@@ -2,8 +2,9 @@ use std::sync::{Arc, RwLock};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
+use tui_textbox::{Textbox, TextboxState};
 
-use crate::{config, player_engine::PlayerEngine, textbox::{Textbox, TextboxState}};
+use crate::{config, player_engine::PlayerEngine};
 
 pub struct RadioModel {
     pub list_streams_state: ListState,
@@ -108,7 +109,7 @@ impl RadioModel {
             let dialog_rect = Rect { width: w, height: h, x, y };
             f.render_widget(open_dialog_block, dialog_rect);
 
-            let textbox = Textbox {};
+            let textbox = Textbox::default();
 
             f.render_stateful_widget(textbox, Rect::new(x + 1, y + 1, w - 2, 1), &mut self.textbox_state);
 
@@ -161,7 +162,7 @@ impl RadioModel {
     }
 
 
-    pub fn handle_events(&mut self, key: KeyEvent) -> std::io::Result<bool> {
+    pub async fn handle_events(&mut self, key: KeyEvent) -> std::io::Result<bool> {
         if self.show_open_dialog {
             self.handle_open_dialog_events(key)
         } else {

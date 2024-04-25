@@ -1,45 +1,65 @@
-use std::{str::FromStr, sync::{Arc, RwLock}};
+use std::{io::ErrorKind, str::FromStr, sync::{Arc, RwLock}};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
-use rodio::cpal::ChannelCount;
+use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
+use tokio::sync::mpsc::UnboundedSender;
+use tui_textbox::{Textbox, TextboxState};
 
 use std::error::Error;
 use rss::Channel;
+use crate::{entity::channel::Entity as ChannelEntity, AsyncAction};
 
-use crate::{config, player_engine::PlayerEngine, textbox::{Textbox, TextboxState}};
+use crate::{config, player_engine::PlayerEngine};
 
 pub struct PodcastsModel {
-    pub list_streams_state: ListState,
+    pub list_state_channels: ListState,
+    pub active_channel: Option<String>,
+    pub list_state_items: ListState,
+    pub active_item: Option<String>,
     pub podcasts_collection: Vec<String>,
-    pub active_stream: Option<String>,
+    pub items_collection: Vec<String>,
     pub error: Option<String>,
     pub show_open_dialog: bool,
     pub textbox_state: TextboxState,
     pub player_engine: Arc<RwLock<PlayerEngine>>,
     help_visible: bool,
+    db: DatabaseConnection,
+    tx: UnboundedSender<crate::AsyncAction>
 }
 
 
-impl Default for PodcastsModel {
-    fn default() -> Self {
+impl PodcastsModel {
+    pub fn new(db: DatabaseConnection, tx: UnboundedSender<crate::AsyncAction>) -> Self {
         Self {
-            list_streams_state: Default::default(),
-            podcasts_collection: Default::default(),
+            list_state_channels: Default::default(),
+            podcasts_collection: vec!["dasko i mladja".to_string(), "agelas".to_string()], // Default::default(),
             help_visible: Default::default(),
-            active_stream: Default::default(),
+            active_channel: Default::default(),
+            list_state_items: Default::default(),
+            items_collection: Default::default(),
+            active_item: Default::default(),
             error: Default::default(),
             show_open_dialog: Default::default(),
             textbox_state: Default::default(),
             player_engine: Default::default(),
+            db,
+            tx
         }
     }
-}
 
-impl PodcastsModel {
+    pub async fn get_channels_from_db(&self) -> Result<(), DbErr>  {
+        let channels = ChannelEntity::find().all(&self.db).await?;
 
-    pub fn example_feed() -> Result<Channel, Box<dyn Error>> {
+
+        Ok(())
+
+    }
+
+    pub async fn get_channel_from_url() -> Result<Channel, Box<dyn Error>> {
         let content = ureq::get("https://podcast.daskoimladja.com/feed.xml").call()?.into_string()?;
+        // let content = ureq::get("https://feeds.transistor.fm/agelast-podcast").call()?.into_string()?;
+
         let channel = Channel::from_str(&content)?;
         Ok(channel)
     }
@@ -52,15 +72,39 @@ impl PodcastsModel {
             .constraints([Constraint::Percentage(100), Constraint::Min(3)])
             .split(size);
 
+        let horizontal_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(vertical_chunks[0]);
+
         let status_block = Block::default().borders(Borders::ALL).title(format!("status"));
 
-        // list
-        let active_stream = match self.active_stream.as_ref() {
+        // list channels
+        let active_channel = match self.active_channel.as_ref() {
             Some(s) => s.clone(),
             None => "".to_string(),
         };
         let list = List::new(self.podcasts_collection.clone().into_iter().map(|i| {
-            if i == active_stream {
+            if i == active_channel {
+                format!(">{}<", i)
+            } else {
+                format!("{}", i)
+            }
+        }))
+        .block(Block::default().borders(Borders::ALL))
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(">> ")
+            .repeat_highlight_symbol(true);
+
+
+        f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
+
+        // list items
+        let active_item = match self.active_item.as_ref() {
+            Some(s) => s.clone(),
+            None => "".to_string(),
+        };
+        let list = List::new(self.items_collection.clone().into_iter().map(|i| {
+            if i == active_item {
                 format!("{} 🎵", i)
             } else {
                 format!("{}", i)
@@ -71,8 +115,7 @@ impl PodcastsModel {
             .highlight_symbol(">> ")
             .repeat_highlight_symbol(true);
 
-        f.render_stateful_widget(list, vertical_chunks[0], &mut self.list_streams_state);
-
+        f.render_stateful_widget(list, horizontal_chunks[1], &mut self.list_state_items);
 
         let status_line = match self.error.as_ref() {
             Some(e) => {
@@ -81,7 +124,7 @@ impl PodcastsModel {
                 ])
             },
             None => {
-                match self.active_stream.as_ref() {
+                match self.active_channel.as_ref() {
                     Some(s) => {
                         let play_char = if self.player_engine.read().unwrap().is_paused() { "Ⅱ" } else { "▶" };
                         Line::from(vec![
@@ -118,7 +161,7 @@ impl PodcastsModel {
             let dialog_rect = Rect { width: w, height: h, x, y };
             f.render_widget(open_dialog_block, dialog_rect);
 
-            let textbox = Textbox {};
+            let textbox = Textbox::default();
 
             f.render_stateful_widget(textbox, Rect::new(x + 1, y + 1, w - 2, 1), &mut self.textbox_state);
 
@@ -171,7 +214,7 @@ impl PodcastsModel {
     }
 
 
-    pub fn handle_events(&mut self, key: KeyEvent) -> std::io::Result<bool> {
+    pub async fn handle_events(&mut self, key: KeyEvent) -> std::io::Result<bool> {
         if self.show_open_dialog {
             self.handle_open_dialog_events(key)
         } else {
@@ -179,16 +222,32 @@ impl PodcastsModel {
                 KeyCode::Char('o') => {
                     self.show_open_dialog = true;
                 },
+                KeyCode::Char('r') => {
+                    self.items_collection.clear();
+                    self.items_collection.push("--reading--".to_string());
+                    let tx = self.tx.clone();
+                    tokio::spawn(async move {
+                        // tokio::time::sleep(Duration::from_secs(5)).await; // simulate network request
+                        let channels = PodcastsModel::get_channel_from_url().await.map_err(|e| std::io::Error::new(ErrorKind::Other, "")).unwrap();
+                        tx.send(AsyncAction::Channel(channels.clone()));
+                    });
+
+
+
+                    // self.items_collection.clear();
+                    // channels.items().iter().for_each(|i| self.items_collection.push(i.title().unwrap_or("-").to_string()));
+
+                }
                 KeyCode::Char('q') => return Ok(true),
                 KeyCode::Enter => {
-                    match self.active_stream {
+                    match self.active_channel {
                         Some(_) => {
                             self.player_engine = Arc::new(RwLock::new(PlayerEngine::new()));
-                            self.active_stream = None;
+                            self.active_channel = None;
                         },
                         None => {
-                            let selected_stream = &self.podcasts_collection[self.list_streams_state.selected().unwrap_or_default()];
-                            self.active_stream = Some(selected_stream.clone());
+                            let selected_stream = &self.podcasts_collection[self.list_state_channels.selected().unwrap_or_default()];
+                            self.active_channel = Some(selected_stream.clone());
                             let mut p = self.player_engine.write().unwrap();
                             match p.open(selected_stream) {
                                 Ok(_) => {
@@ -200,7 +259,7 @@ impl PodcastsModel {
                     }
                 },
                 KeyCode::Char(' ') => {
-                    if self.active_stream.is_some() {
+                    if self.active_channel.is_some() {
                         let p = self.player_engine.write().unwrap();
                         if p.is_paused() {
                             p.resume()
@@ -218,22 +277,22 @@ impl PodcastsModel {
                     p.decrease_volume();
                 },
                 KeyCode::Down => {
-                    let mut selected = self.list_streams_state.selected().unwrap_or_default();
+                    let mut selected = self.list_state_channels.selected().unwrap_or_default();
                     let len = self.podcasts_collection.len();
                     selected = if selected >= len - 1 { 0 } else { selected + 1 };
-                    self.list_streams_state.select(Some(selected));
+                    self.list_state_channels.select(Some(selected));
                 },
                 KeyCode::Up => {
-                    let mut selected = self.list_streams_state.selected().unwrap_or_default();
+                    let mut selected = self.list_state_channels.selected().unwrap_or_default();
                     let len = self.podcasts_collection.len();
                     selected = if selected <= 0 { len - 1 } else { selected - 1 };
-                    self.list_streams_state.select(Some(selected));
+                    self.list_state_channels.select(Some(selected));
                 },
                 KeyCode::Char('d') | KeyCode::Delete => {
-                    let selected = self.list_streams_state.selected().unwrap_or_default();
+                    let selected = self.list_state_channels.selected().unwrap_or_default();
                     self.podcasts_collection.remove(selected);
                     if selected >= self.podcasts_collection.len() {
-                        self.list_streams_state.select(Some(selected - 1));
+                        self.list_state_channels.select(Some(selected - 1));
                     }
                     config::save(self.podcasts_collection.clone())?;
                 },
@@ -251,7 +310,7 @@ impl PodcastsModel {
             (KeyCode::Esc, _) => self.show_open_dialog = false,
             (KeyCode::Enter, _) => {
                 self.podcasts_collection.push(self.textbox_state.text.clone());
-                config::save(self.podcasts_collection.clone())?;
+                // config::save(self.podcasts_collection.clone())?;
                 self.show_open_dialog = false;
             },
             (key_code, key_modifiers) => {

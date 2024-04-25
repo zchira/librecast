@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 fn config_path() -> PathBuf {
-    home::home_dir().unwrap_or("./".into()).join(".radio_rebelde")
+    home::home_dir().unwrap_or("./".into()).join(".librecast.radio")
 }
 
 pub fn load() -> Result<Vec<String>, std::io::Error> {
