@@ -1,30 +1,31 @@
-use std::{io::ErrorKind, str::FromStr, sync::{Arc, RwLock}};
+use std::{borrow::BorrowMut, io::ErrorKind, str::FromStr, sync::{Arc, RwLock}};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
-use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
+use sea_orm::{ActiveValue, DatabaseConnection, DbErr, EntityTrait};
 use tokio::sync::mpsc::UnboundedSender;
 use tui_textbox::{Textbox, TextboxState};
 
 use std::error::Error;
 use rss::Channel;
-use crate::{entity::channel::Entity as ChannelEntity, AsyncAction};
+use crate::{entity::{self, channel::Entity as ChannelEntity}, AsyncAction};
 
 use crate::{config, player_engine::PlayerEngine};
 
 pub struct PodcastsModel {
-    pub list_state_channels: ListState,
+    db: DatabaseConnection,
+    help_visible: bool,
     pub active_channel: Option<String>,
-    pub list_state_items: ListState,
     pub active_item: Option<String>,
-    pub podcasts_collection: Vec<String>,
-    pub items_collection: Vec<String>,
     pub error: Option<String>,
+    pub items_collection: Vec<String>,
+    pub list_state_channels: ListState,
+    pub list_state_items: ListState,
+    pub active_list_state: usize,
+    pub player_engine: Arc<RwLock<PlayerEngine>>,
+    pub podcasts_collection: Vec<String>,
     pub show_open_dialog: bool,
     pub textbox_state: TextboxState,
-    pub player_engine: Arc<RwLock<PlayerEngine>>,
-    help_visible: bool,
-    db: DatabaseConnection,
     tx: UnboundedSender<crate::AsyncAction>
 }
 
@@ -32,18 +33,19 @@ pub struct PodcastsModel {
 impl PodcastsModel {
     pub fn new(db: DatabaseConnection, tx: UnboundedSender<crate::AsyncAction>) -> Self {
         Self {
-            list_state_channels: Default::default(),
-            podcasts_collection: vec!["dasko i mladja".to_string(), "agelas".to_string()], // Default::default(),
-            help_visible: Default::default(),
             active_channel: Default::default(),
-            list_state_items: Default::default(),
-            items_collection: Default::default(),
             active_item: Default::default(),
+            db,
             error: Default::default(),
+            help_visible: Default::default(),
+            items_collection: Default::default(),
+            list_state_channels: Default::default(),
+            list_state_items: Default::default(),
+            active_list_state: 0,
+            player_engine: Default::default(),
+            podcasts_collection: vec!["dasko i mladja".to_string(), "agelast".to_string()], // Default::default(),
             show_open_dialog: Default::default(),
             textbox_state: Default::default(),
-            player_engine: Default::default(),
-            db,
             tx
         }
     }
@@ -226,18 +228,41 @@ impl PodcastsModel {
                     self.items_collection.clear();
                     self.items_collection.push("--reading--".to_string());
                     let tx = self.tx.clone();
+                    let db = self.db.clone();
+
                     tokio::spawn(async move {
                         // tokio::time::sleep(Duration::from_secs(5)).await; // simulate network request
-                        let channels = PodcastsModel::get_channel_from_url().await.map_err(|e| std::io::Error::new(ErrorKind::Other, "")).unwrap();
-                        tx.send(AsyncAction::Channel(channels.clone()));
+                        let channel = PodcastsModel::get_channel_from_url().await.map_err(|_| std::io::Error::new(ErrorKind::Other, "")).unwrap();
+
+                        use entity::channel::{ Entity, ActiveModel };
+                        let am: ActiveModel = ActiveModel {
+                            title: ActiveValue::set(Some(channel.title().to_string())),
+                            link: ActiveValue::set(Some(channel.link().to_string())),
+                            description: ActiveValue::set(Some(channel.description().to_string())),
+                            id: ActiveValue::NotSet
+                        };
+
+                        let res = Entity::insert(am).exec(&db).await.unwrap();
+
+                        let items = channel.items().iter().map(|i| {
+                            entity::channel_item::ActiveModel {
+                                id: ActiveValue::NotSet,
+                                channel_id: ActiveValue::set(res.last_insert_id),
+                                title: ActiveValue::set(i.title().map(|t| t.to_string())),
+                                link: ActiveValue::set(i.link().map(|l| l.to_string())),
+                                description: ActiveValue::set(i.description().map(|d| d.to_string())),
+                                guid: ActiveValue::set(i.guid().map(|g| g.value.clone())),
+                                pub_date: ActiveValue::set(i.pub_date().map(|d| d.to_string())),
+                            }
+                        });
+
+                        let _ = entity::channel_item::Entity::insert_many(items).exec(&db).await;
+                        tx.send(AsyncAction::ChannelAdded(res.last_insert_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                     });
-
-
-
-                    // self.items_collection.clear();
-                    // channels.items().iter().for_each(|i| self.items_collection.push(i.title().unwrap_or("-").to_string()));
-
                 }
+                KeyCode::Left | KeyCode::Right => { 
+                    self.active_list_state = (self.active_list_state + 1) % 2;
+                },
                 KeyCode::Char('q') => return Ok(true),
                 KeyCode::Enter => {
                     match self.active_channel {
@@ -277,16 +302,25 @@ impl PodcastsModel {
                     p.decrease_volume();
                 },
                 KeyCode::Down => {
-                    let mut selected = self.list_state_channels.selected().unwrap_or_default();
-                    let len = self.podcasts_collection.len();
+                    let len = self.list_state_len();
+                    let list_state = match self.active_list_state {
+                        0 => self.list_state_channels.borrow_mut(),
+                        _ => self.list_state_items.borrow_mut(),
+                    };
+                    let mut selected = list_state.selected().unwrap_or_default();
                     selected = if selected >= len - 1 { 0 } else { selected + 1 };
-                    self.list_state_channels.select(Some(selected));
+                    list_state.select(Some(selected));
                 },
                 KeyCode::Up => {
-                    let mut selected = self.list_state_channels.selected().unwrap_or_default();
-                    let len = self.podcasts_collection.len();
+                    let len = self.list_state_len();
+                    let list_state = match self.active_list_state {
+                        0 => self.list_state_channels.borrow_mut(),
+                        _ => self.list_state_items.borrow_mut(),
+
+                    };
+                    let mut selected = list_state.selected().unwrap_or_default();
                     selected = if selected <= 0 { len - 1 } else { selected - 1 };
-                    self.list_state_channels.select(Some(selected));
+                    list_state.select(Some(selected));
                 },
                 KeyCode::Char('d') | KeyCode::Delete => {
                     let selected = self.list_state_channels.selected().unwrap_or_default();
@@ -303,6 +337,7 @@ impl PodcastsModel {
             }
             Ok(false)
         }
+
     }
 
     fn handle_open_dialog_events(&mut self, key: KeyEvent) -> std::io::Result<bool> {
@@ -319,6 +354,13 @@ impl PodcastsModel {
         }
 
         Ok(false)
+    }
+
+    fn list_state_len(&self) -> usize {
+        match self.active_list_state {
+            0 => self.podcasts_collection.len(),
+            _ => self.items_collection.len(),
+        }
     }
 
 }

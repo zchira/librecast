@@ -178,14 +178,16 @@ impl RadioModel {
                             self.active_stream = None;
                         },
                         None => {
-                            let selected_stream = &self.streams_collection[self.list_streams_state.selected().unwrap_or_default()];
-                            self.active_stream = Some(selected_stream.clone());
-                            let mut p = self.player_engine.write().unwrap();
-                            match p.open(selected_stream) {
-                                Ok(_) => {
-                                    self.error = None;
-                                },
-                                Err(e) => self.error = Some(e.to_string()),
+                            if let Some(index) = self.list_streams_state.selected() {
+                                let selected_stream = &self.streams_collection[index];
+                                self.active_stream = Some(selected_stream.clone());
+                                let mut p = self.player_engine.write().unwrap();
+                                match p.open(selected_stream) {
+                                    Ok(_) => {
+                                        self.error = None;
+                                    },
+                                    Err(e) => self.error = Some(e.to_string()),
+                                }
                             }
                         },
                     }
@@ -211,14 +213,18 @@ impl RadioModel {
                 KeyCode::Down => {
                     let mut selected = self.list_streams_state.selected().unwrap_or_default();
                     let len = self.streams_collection.len();
-                    selected = if selected >= len - 1 { 0 } else { selected + 1 };
-                    self.list_streams_state.select(Some(selected));
+                    if len > 0 {
+                        selected = if selected >= len - 1 { 0 } else { selected + 1 };
+                        self.list_streams_state.select(Some(selected));
+                    }
                 },
                 KeyCode::Up => {
                     let mut selected = self.list_streams_state.selected().unwrap_or_default();
                     let len = self.streams_collection.len();
-                    selected = if selected <= 0 { len - 1 } else { selected - 1 };
-                    self.list_streams_state.select(Some(selected));
+                    if len > 0 {
+                        selected = if selected <= 0 { len - 1 } else { selected - 1 };
+                        self.list_streams_state.select(Some(selected));
+                    }
                 },
                 KeyCode::Char('d') | KeyCode::Delete => {
                     let selected = self.list_streams_state.selected().unwrap_or_default();

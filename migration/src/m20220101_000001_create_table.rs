@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                         .col(ColumnDef::new(Channel::Id).integer().not_null().auto_increment().primary_key())
                         .col(ColumnDef::new(Channel::Title).string())
-                        .col(ColumnDef::new(Channel::Link).string())
+                        .col(ColumnDef::new(Channel::Link).unique_key().string())
                         .col(ColumnDef::new(Channel::Description).string())
                         // .foreign_key(
                         //     ForeignKey::create()

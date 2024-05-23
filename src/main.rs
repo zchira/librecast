@@ -14,8 +14,8 @@ use radio_model::RadioModel;
 use ratatui::{Terminal, prelude::{CrosstermBackend, Backend, Layout, Direction}, Frame, widgets::{Block, Borders, ListState, Tabs}};
 use ratatui::layout::Constraint;
 use rss::Channel;
-use sea_orm::{Database, DatabaseConnection};
-use tokio::sync::mpsc;
+use sea_orm::{ActiveValue, ColumnTrait, Database, DatabaseConnection, EntityOrSelect, EntityTrait, QueryFilter};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub struct App {
     radio_model: RadioModel,
@@ -73,7 +73,8 @@ impl App {
 }
 
 pub enum AsyncAction {
-    Channel(Channel)
+    Channel(Channel), // remove?
+    ChannelAdded(i32)
 }
 
 #[tokio::main]
@@ -92,7 +93,7 @@ pub async fn main() -> eyre::Result<()> {
         // streams_collection: vec!["https://stream.daskoimladja.com:9000/stream".to_string(), "https://live.radio.fake".to_string(), "test".to_string()],
         active_tab: 0,
         radio_model: Default::default(),
-        podcasts_model: PodcastsModel::new(db, action_tx)
+        podcasts_model: PodcastsModel::new(db.clone(), action_tx)
     };
     app.radio_model.streams_collection = config::load()?;
 
@@ -100,7 +101,7 @@ pub async fn main() -> eyre::Result<()> {
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
-    let _res = run_app(&mut terminal, &mut app).await?;
+    let _res = run_app(&mut terminal, &mut app, &mut action_rx, &db).await?;
 
     disable_raw_mode()?;
     execute!(
@@ -116,6 +117,8 @@ pub async fn main() -> eyre::Result<()> {
 async fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
+    action_rx: &mut UnboundedReceiver<AsyncAction>,
+    db: &DatabaseConnection
 ) -> eyre::Result<()> {
     loop {
         let mut events = event_handler::EventHandler::new();
@@ -129,6 +132,26 @@ async fn run_app<B: Backend>(
             }
 
             let res = app.handle_events(event).await;
+
+            if let Ok(a) = action_rx.try_recv() {
+                match a {
+                    AsyncAction::Channel(_channel) => {},
+                    AsyncAction::ChannelAdded(id) => {
+                        // use entity::channel::{ Entity, ActiveModel };
+
+                        let items = entity::channel_item::Entity::find().filter(entity::channel_item::Column::ChannelId.eq(id)).all(db).await?;
+
+                        app.podcasts_model.items_collection.clear();
+                        items.iter().for_each(|i| {
+                            app.podcasts_model.items_collection.push(i.title.clone().unwrap_or("-".to_string()));
+                        });
+
+
+                    },
+                }
+
+
+            }
 
             if let Ok(true) = res {
                 return Ok(());
