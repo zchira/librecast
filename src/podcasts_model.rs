@@ -1,3 +1,4 @@
+use core::{panic};
 use std::{borrow::BorrowMut, io::ErrorKind, str::FromStr, sync::{Arc, RwLock}};
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -16,9 +17,9 @@ pub struct PodcastsModel {
     db: DatabaseConnection,
     help_visible: bool,
     pub active_channel: Option<String>,
-    pub active_item: Option<String>,
+    pub active_item: Option<rss::Item>,
     pub error: Option<String>,
-    pub items_collection: Vec<String>,
+    pub items_collection: Vec<rss::Item>,
     pub list_state_channels: ListState,
     pub list_state_items: ListState,
     pub active_list_state: usize,
@@ -32,6 +33,8 @@ pub struct PodcastsModel {
 
 impl PodcastsModel {
     pub fn new(db: DatabaseConnection, tx: UnboundedSender<crate::AsyncAction>) -> Self {
+        let mut list_state_channels: ListState = Default::default();
+        list_state_channels.select(Some(0));
         Self {
             active_channel: Default::default(),
             active_item: Default::default(),
@@ -39,7 +42,7 @@ impl PodcastsModel {
             error: Default::default(),
             help_visible: Default::default(),
             items_collection: Default::default(),
-            list_state_channels: Default::default(),
+            list_state_channels,
             list_state_items: Default::default(),
             active_list_state: 0,
             player_engine: Default::default(),
@@ -81,6 +84,7 @@ impl PodcastsModel {
         let status_block = Block::default().borders(Borders::ALL).title(format!("status"));
 
         // list channels
+        let fg_color  = |i: usize| if self.active_list_state == i { ratatui::style::Color::Blue } else { ratatui::style::Color::DarkGray };
         let active_channel = match self.active_channel.as_ref() {
             Some(s) => s.clone(),
             None => "".to_string(),
@@ -92,6 +96,7 @@ impl PodcastsModel {
                 format!("{}", i)
             }
         }))
+        .fg(fg_color(0))
         .block(Block::default().borders(Borders::ALL))
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol(">> ")
@@ -101,17 +106,18 @@ impl PodcastsModel {
         f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
 
         // list items
-        let active_item = match self.active_item.as_ref() {
-            Some(s) => s.clone(),
-            None => "".to_string(),
-        };
-        let list = List::new(self.items_collection.clone().into_iter().map(|i| {
-            if i == active_item {
-                format!("{} 🎵", i)
+        // let active_item = match self.active_item.as_ref() {
+        //     Some(s) => s.clone(),
+        //     None => "".to_string(),
+        // };
+        let list = List::new(self.items_collection.clone().into_iter().enumerate().map(|(index, c)| {
+            if index == self.list_state_items.selected().unwrap_or(0) {
+                format!("{} 🎵", c.title.unwrap_or("".to_string()))
             } else {
-                format!("{}", i)
+                format!("{}", c.title.unwrap_or("".to_string()))
             }
         }))
+        .fg(fg_color(1))
         .block(Block::default().borders(Borders::ALL))
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol(">> ")
@@ -122,7 +128,7 @@ impl PodcastsModel {
         let status_line = match self.error.as_ref() {
             Some(e) => {
                 Line::from(vec![
-                           Span::styled(format!("Error: {}", e.to_string()), Style::default().fg(ratatui::style::Color::Red)),
+                    Span::styled(format!("Error: {}", e.to_string()), Style::default().fg(ratatui::style::Color::Red)),
                 ])
             },
             None => {
@@ -130,12 +136,12 @@ impl PodcastsModel {
                     Some(s) => {
                         let play_char = if self.player_engine.read().unwrap().is_paused() { "Ⅱ" } else { "▶" };
                         Line::from(vec![
-                                   Span::styled(format!("{} {}", play_char, s), Style::default().fg(ratatui::style::Color::Blue)),
+                            Span::styled(format!("{} {}", play_char, s), Style::default().fg(ratatui::style::Color::Blue)),
                         ])
                     },
                     None => {
                         Line::from(vec![
-                                   Span::styled(format!("■"), Style::default()),
+                            Span::styled(format!("■"), Style::default()),
                         ])
                     }
                 }
@@ -226,7 +232,7 @@ impl PodcastsModel {
                 },
                 KeyCode::Char('r') => {
                     self.items_collection.clear();
-                    self.items_collection.push("--reading--".to_string());
+                    // self.items_collection.push("--reading--".to_string());
                     let tx = self.tx.clone();
                     let db = self.db.clone();
 
@@ -250,6 +256,8 @@ impl PodcastsModel {
                                 channel_id: ActiveValue::set(res.last_insert_id),
                                 title: ActiveValue::set(i.title().map(|t| t.to_string())),
                                 link: ActiveValue::set(i.link().map(|l| l.to_string())),
+                                source: ActiveValue::set(i.source().map(|s| s.url.to_string())),
+                                enclosure: ActiveValue::set(i.enclosure().map(|e| e.url.to_string())),
                                 description: ActiveValue::set(i.description().map(|d| d.to_string())),
                                 guid: ActiveValue::set(i.guid().map(|g| g.value.clone())),
                                 pub_date: ActiveValue::set(i.pub_date().map(|d| d.to_string())),
@@ -265,22 +273,27 @@ impl PodcastsModel {
                 },
                 KeyCode::Char('q') => return Ok(true),
                 KeyCode::Enter => {
-                    match self.active_channel {
-                        Some(_) => {
-                            self.player_engine = Arc::new(RwLock::new(PlayerEngine::new()));
-                            self.active_channel = None;
-                        },
-                        None => {
-                            let selected_stream = &self.podcasts_collection[self.list_state_channels.selected().unwrap_or_default()];
-                            self.active_channel = Some(selected_stream.clone());
-                            let mut p = self.player_engine.write().unwrap();
-                            match p.open(selected_stream) {
-                                Ok(_) => {
-                                    self.error = None;
-                                },
-                                Err(e) => self.error = Some(e.to_string()),
-                            }
-                        },
+                    if self.active_list_state == 0 {
+                        // load items then move items list
+                        self.active_list_state = self.active_list_state + 1;
+                    } else {
+                        match self.active_item {
+                            Some(_) => {
+                                self.player_engine = Arc::new(RwLock::new(PlayerEngine::new()));
+                                self.active_item = None;
+                            },
+                            None => {
+                                let selected_episode = &self.items_collection[self.list_state_items.selected().unwrap_or_default()];
+                                self.active_item = Some(selected_episode.clone());
+                                let mut p = self.player_engine.write().unwrap();
+                                match p.open(&selected_episode.enclosure().unwrap().url) {
+                                    Ok(_) => {
+                                        self.error = None;
+                                    },
+                                    Err(e) => self.error = Some(e.to_string()),
+                                }
+                            },
+                        }
                     }
                 },
                 KeyCode::Char(' ') => {

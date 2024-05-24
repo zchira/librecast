@@ -35,6 +35,8 @@ impl MigrationTrait for Migration {
                         .col(ColumnDef::new(ChannelItem::ChannelId).integer().not_null())
                         .col(ColumnDef::new(ChannelItem::Title).string())
                         .col(ColumnDef::new(ChannelItem::Link).string())
+                        .col(ColumnDef::new(ChannelItem::Source).string())
+                        .col(ColumnDef::new(ChannelItem::Enclosure).string())
                         .col(ColumnDef::new(ChannelItem::Description).string())
                         .col(ColumnDef::new(ChannelItem::Guid).uuid())
                         .col(ColumnDef::new(ChannelItem::PubDate).date_time())
@@ -109,6 +111,8 @@ enum ChannelItem {
     ChannelId,
     Title,
     Link,
+    Enclosure,
+    Source,
     Description,
     Guid,
     PubDate

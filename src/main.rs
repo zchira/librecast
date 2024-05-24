@@ -7,14 +7,14 @@ mod event_handler;
 
 use std::io::stdout;
 use color_eyre::eyre;
-use crossterm::{terminal::{EnterAlternateScreen, enable_raw_mode, disable_raw_mode, LeaveAlternateScreen}, execute, event::{DisableMouseCapture, self, KeyEventKind, KeyEvent, KeyCode}, ExecutableCommand};
+use crossterm::{terminal::{EnterAlternateScreen, enable_raw_mode, disable_raw_mode, LeaveAlternateScreen}, execute, event::{DisableMouseCapture, KeyCode}, ExecutableCommand};
 use event_handler::Event;
 use podcasts_model::PodcastsModel;
 use radio_model::RadioModel;
 use ratatui::{Terminal, prelude::{CrosstermBackend, Backend, Layout, Direction}, Frame, widgets::{Block, Borders, ListState, Tabs}};
 use ratatui::layout::Constraint;
 use rss::Channel;
-use sea_orm::{ActiveValue, ColumnTrait, Database, DatabaseConnection, EntityOrSelect, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub struct App {
@@ -37,7 +37,6 @@ impl App {
             .select(self.active_tab);
 
         f.render_widget(tabs, vertical_chunks[0]);
-
 
         match self.active_tab {
             0 => self.radio_model.ui(vertical_chunks[1], f),
@@ -143,10 +142,31 @@ async fn run_app<B: Backend>(
 
                         app.podcasts_model.items_collection.clear();
                         items.iter().for_each(|i| {
-                            app.podcasts_model.items_collection.push(i.title.clone().unwrap_or("-".to_string()));
+                            let item = rss::Item {
+                                title: i.title.clone(),
+                                link: i.link.clone(),
+                                description: i.description.clone(),
+                                author: None,
+                                categories: Default::default(),
+                                comments: None,
+                                enclosure: i.enclosure.as_ref().map(|s| rss::Enclosure{
+                                    url: s.to_string(),
+                                    length: "".to_string(),
+                                    mime_type: "".to_string(),
+                                }),
+                                guid: None,
+                                pub_date: i.pub_date.clone(),
+                                source: i.source.as_ref().map(|s| rss::Source { title: None, url: s.clone()}),
+                                content: None,
+                                extensions: Default::default(),
+                                itunes_ext: None,
+                                dublin_core_ext: None,
+                            };
+                            app.podcasts_model.items_collection.push(item);
                         });
-
-
+                        if items.len() > 0 {
+                            app.podcasts_model.list_state_items.select(Some(0));
+                        }
                     },
                 }
 
@@ -158,18 +178,5 @@ async fn run_app<B: Backend>(
             }
 
         }
-
-        // terminal.draw(|f| app.ui(f))?; //  ui(f, app))?;
-        //
-        // if event::poll(std::time::Duration::from_millis(16))? {
-        //     if let event::Event::Key(key) = event::read()? {
-        //         if key.kind == KeyEventKind::Press {
-        //             if let Ok(true) = app.handle_events(key) {
-        //                 // exit
-        //                 return Ok(true);
-        //             }
-        //         }
-        //     }
-        // }
     }
 }
