@@ -1,15 +1,14 @@
-use core::{panic};
 use std::{borrow::BorrowMut, io::ErrorKind, str::FromStr, sync::{Arc, RwLock}};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
-use sea_orm::{ActiveValue, DatabaseConnection, DbErr, EntityTrait};
+use sea_orm::{ActiveValue, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
 use tokio::sync::mpsc::UnboundedSender;
 use tui_textbox::{Textbox, TextboxState};
 
 use std::error::Error;
 use rss::Channel;
-use crate::{entity::{self, channel::Entity as ChannelEntity}, AsyncAction};
+use crate::{entity::{self, channel::Entity as ChannelEntity, prelude::ChannelItem}, AsyncAction};
 
 use crate::{config, player_engine::PlayerEngine};
 
@@ -248,12 +247,20 @@ impl PodcastsModel {
                             id: ActiveValue::NotSet
                         };
 
-                        let res = Entity::insert(am).exec(&db).await.unwrap();
+                        let exist = Entity::find().filter(entity::channel::Column::Link.eq(channel.link())).one(&db).await.unwrap();
+
+                        let channel_id = if let Some(exist) = exist {
+                            exist.id
+                        } else {
+                            // let res = Entity::update_many().filter(entity::channel::Column::Link.eq(channel.link())).exec(&db).await.unwrap();
+                            let res = Entity::insert(am).exec(&db).await.unwrap();
+                            res.last_insert_id
+                        };
 
                         let items = channel.items().iter().map(|i| {
                             entity::channel_item::ActiveModel {
                                 id: ActiveValue::NotSet,
-                                channel_id: ActiveValue::set(res.last_insert_id),
+                                channel_id: ActiveValue::set(channel_id),
                                 title: ActiveValue::set(i.title().map(|t| t.to_string())),
                                 link: ActiveValue::set(i.link().map(|l| l.to_string())),
                                 source: ActiveValue::set(i.source().map(|s| s.url.to_string())),
@@ -264,13 +271,21 @@ impl PodcastsModel {
                             }
                         });
 
+                        let _ = entity::channel_item::Entity::delete_many().filter(entity::channel_item::Column::ChannelId.eq(channel_id));
+
                         let _ = entity::channel_item::Entity::insert_many(items).exec(&db).await;
-                        tx.send(AsyncAction::ChannelAdded(res.last_insert_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
+                        tx.send(AsyncAction::ChannelAdded(channel_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                     });
+                }
+                KeyCode::Char('k') => {
+                    if self.active_item.is_some() {
+                        let p = self.player_engine.read().unwrap();
+                        p.seek_forward();
+                    }
                 }
                 KeyCode::Left | KeyCode::Right => { 
                     self.active_list_state = (self.active_list_state + 1) % 2;
-                },
+                }
                 KeyCode::Char('q') => return Ok(true),
                 KeyCode::Enter => {
                     if self.active_list_state == 0 {
@@ -298,7 +313,7 @@ impl PodcastsModel {
                 },
                 KeyCode::Char(' ') => {
                     if self.active_channel.is_some() {
-                        let p = self.player_engine.write().unwrap();
+                        let mut p = self.player_engine.write().unwrap();
                         if p.is_paused() {
                             p.resume()
                         } else {

@@ -1,12 +1,14 @@
 use std::io::prelude::*;
-use rodio::{Decoder, OutputStream, source::Source, OutputStreamHandle, Sink};
+use std::io::BufReader;
+use std::time::Duration;
+use libre_url2audio_lib::Player;
+
 
 
 pub struct PlayerEngine {
     pub stream_addr: Option<String>,
-    stream: OutputStream,
-    stream_handle: OutputStreamHandle,
-    sink: Sink
+    pub player: Player,
+    playing: bool
 }
 
 impl Default for PlayerEngine {
@@ -17,64 +19,71 @@ impl Default for PlayerEngine {
 
 impl PlayerEngine {
     pub fn new() -> Self {
-        let (stream, stream_handle) = OutputStream::try_default().unwrap();
-        let sink  = Sink::try_new(&stream_handle).unwrap();
+        let player = Player::new();
         PlayerEngine {
             stream_addr: None,
-            stream,
-            stream_handle,
-            sink
+            player,
+            playing: false
         }
     }
 
     pub fn open(&mut self, stream_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.player.open(stream_addr);
         self.stream_addr = Some(stream_addr.to_string());
-        self.play()?;
+        self.player.play();
+        self.playing = true;
         Ok(())
     }
 
-    fn play(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn play(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(addr) = self.stream_addr.as_ref() {
-            let fifo_read = FifoRead::from_str(&addr)?;
-            let source = Decoder::new(fifo_read).unwrap();
-
-            // self.sink.play();
-            self.sink.append(source);
-            self.sink.set_volume(self.get_volume());
-            // self.sink.play();
-            // let _play = self.stream_handle.play_raw(source.convert_samples())?;
+            self.player.open(addr);
+            self.player.play();
+            self.playing = true;
         }
         Ok(())
     }
 
     pub fn is_paused(&self) -> bool {
-        self.sink.is_paused()
+        self.playing
     }
 
-    pub fn pause(&self) {
-        self.sink.pause()
+    pub fn pause(&mut self) {
+        self.playing = false;
+        self.player.pause()
     }
 
     pub fn resume(&self) {
-        self.sink.play()
+        self.player.play()
+    }
+
+    /// seek 30 seconds forward
+    pub fn seek_forward(&self) {
+        self.player.seek_relative(30.0);
+    }
+
+    /// seek 10 seconds backward
+    pub fn seek_backward(&self) {
+        self.player.seek_relative(-10.0);
     }
 
     pub fn get_volume(&self) -> f32 {
-        self.sink.volume()
+        // self.sink.volume()
+        1.0
     }
 
     pub fn increase_volume(&mut self) {
-        if self.get_volume() < 1.0 {
-            self.sink.set_volume(self.get_volume() + 0.1);
-        }
+        // if self.get_volume() < 1.0 {
+        //     self.sink.set_volume(self.get_volume() + 0.1);
+        // }
     }
 
     pub fn decrease_volume(&mut self) {
-        if self.get_volume() > 0.0 {
-            let mut new_val = self.get_volume() - 0.1;
-            new_val = if new_val < 0.0 { 0.0 } else { new_val };
-            self.sink.set_volume(new_val);
-        }
+        // if self.get_volume() > 0.0 {
+        //     let mut new_val = self.get_volume() - 0.1;
+        //     new_val = if new_val < 0.0 { 0.0 } else { new_val };
+        //     self.sink.set_volume(new_val);
+        // }
     }
 
 }
@@ -112,7 +121,12 @@ impl Read for FifoRead {
 }
 
 impl Seek for FifoRead {
-    fn seek(&mut self, _pos: std::io::SeekFrom) -> std::io::Result<u64> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        match pos {
+            std::io::SeekFrom::Start(i) => {},
+            std::io::SeekFrom::End(_) => todo!(),
+            std::io::SeekFrom::Current(_) => todo!(),
+        }
         Ok(0)
     }
 }

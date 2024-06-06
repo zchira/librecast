@@ -12,10 +12,10 @@ clipboard = "0.5.0"
 color-eyre = "0.6.3"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 futures = "0.3.30"
-# curl = "0.4.46"
 home = "0.5.9"
+libre-url2audio-lib = "0.1.1"
 ratatui = "0.26.1"
-rodio = { version = "0.17.3", features = ["symphonia-all"], default-features = false }
+# rodio = { version = "0.18.1", features = ["symphonia-all"], default-features = false }
 rss = "2.0.7"
 sea-orm = { version = "0.12.15", features = ["sqlx-sqlite", "runtime-async-std-rustls",  "macros"] }
 serde = "1.0.197"

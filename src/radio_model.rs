@@ -194,7 +194,7 @@ impl RadioModel {
                 },
                 KeyCode::Char(' ') => {
                     if self.active_stream.is_some() {
-                        let p = self.player_engine.write().unwrap();
+                        let mut p = self.player_engine.write().unwrap();
                         if p.is_paused() {
                             p.resume()
                         } else {
