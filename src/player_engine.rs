@@ -1,9 +1,7 @@
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::time::Duration;
-use libre_url2audio_lib::Player;
-
-
+use url2audio::Player;
 
 pub struct PlayerEngine {
     pub stream_addr: Option<String>,
