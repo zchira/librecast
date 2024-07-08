@@ -5,6 +5,7 @@ mod config;
 mod entity;
 mod event_handler;
 
+use migration::{Migrator, MigratorTrait};
 use std::io::stdout;
 use color_eyre::eyre;
 use crossterm::{terminal::{EnterAlternateScreen, enable_raw_mode, disable_raw_mode, LeaveAlternateScreen}, execute, event::{DisableMouseCapture, KeyCode}, ExecutableCommand};
@@ -85,8 +86,9 @@ pub async fn main() -> eyre::Result<()> {
 
     let home = std::env::var("HOME").unwrap();
     let connection = std::env::var("DATABASE_URL").unwrap_or(format!("sqlite://{}/.librecast.db?mode=rwc", home));
-    let db: DatabaseConnection = Database::connect(connection).await.unwrap();
+    let db: DatabaseConnection = Database::connect(connection).await?;
 
+    Migrator::up(&db, None).await?;
     // run tui
     let mut app = App {
         // streams_collection: vec!["https://stream.daskoimladja.com:9000/stream".to_string(), "https://live.radio.fake".to_string(), "test".to_string()],
