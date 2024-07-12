@@ -8,7 +8,7 @@ use tui_textbox::{Textbox, TextboxState};
 
 use std::error::Error;
 use rss::Channel;
-use crate::{entity::{self, channel::Entity as ChannelEntity, prelude::ChannelItem}, AsyncAction};
+use crate::{AsyncAction, entity::{self, channel::Entity as ChannelEntity}, widgets::timeline::Timeline};
 
 use crate::{config, player_engine::PlayerEngine};
 
@@ -98,7 +98,7 @@ impl PodcastsModel {
         .fg(fg_color(0))
         .block(Block::default().borders(Borders::ALL))
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-            .highlight_symbol(">> ")
+            .highlight_symbol("> ")
             .repeat_highlight_symbol(true);
 
 
@@ -109,11 +109,21 @@ impl PodcastsModel {
         //     Some(s) => s.clone(),
         //     None => "".to_string(),
         // };
-        let list = List::new(self.items_collection.clone().into_iter().enumerate().map(|(index, c)| {
-            if index == self.list_state_items.selected().unwrap_or(0) {
-                format!("{} 🎵", c.title.unwrap_or("".to_string()))
+        let selected = self.list_state_items.selected().unwrap_or(0);
+        let offset = self.list_state_items.offset();
+        let v: Vec<rss::Item> = if self.items_collection.len() > self.list_state_items.offset() + 80 {
+            self.items_collection[offset.. offset + 80].into()
+        } else {
+            self.items_collection[..].into()
+        };
+
+        let list = List::new(v.into_iter().enumerate().map(|(index, c)| {
+            if index < offset || index > offset + 80 {
+                String::new()
+            } else if index == selected {
+                format!("{} {}/{} 🎵", c.title.clone().unwrap_or("".to_string()), selected, offset)
             } else {
-                format!("{}", c.title.unwrap_or("".to_string()))
+                format!("{} [{}]", c.title.clone().unwrap_or("".to_string()), index)
             }
         }))
         .fg(fg_color(1))
@@ -124,31 +134,40 @@ impl PodcastsModel {
 
         f.render_stateful_widget(list, horizontal_chunks[1], &mut self.list_state_items);
 
-        let status_line = match self.error.as_ref() {
-            Some(e) => {
-                Line::from(vec![
-                    Span::styled(format!("Error: {}", e.to_string()), Style::default().fg(ratatui::style::Color::Red)),
-                ])
-            },
-            None => {
-                match self.active_channel.as_ref() {
-                    Some(s) => {
-                        let play_char = if self.player_engine.read().unwrap().is_paused() { "Ⅱ" } else { "▶" };
-                        Line::from(vec![
-                            Span::styled(format!("{} {}", play_char, s), Style::default().fg(ratatui::style::Color::Blue)),
-                        ])
-                    },
-                    None => {
-                        Line::from(vec![
-                            Span::styled(format!("■"), Style::default()),
-                        ])
-                    }
-                }
-            },
+        // let status_line = match self.error.as_ref() {
+        //     Some(e) => {
+        //         Line::from(vec![
+        //             Span::styled(format!("Error: {}", e.to_string()), Style::default().fg(ratatui::style::Color::Red)),
+        //         ])
+        //     },
+        //     None => {
+        //         match self.active_channel.as_ref() {
+        //             Some(s) => {
+        //                 let play_char = if self.player_engine.read().unwrap().is_paused() { "Ⅱ" } else { "▶" };
+        //                 Line::from(vec![
+        //                     Span::styled(format!("{} {}", play_char, s), Style::default().fg(ratatui::style::Color::Blue)),
+        //                 ])
+        //             },
+        //             None => {
+        //                 Line::from(vec![
+        //                     Span::styled(format!("■"), Style::default()),
+        //                 ])
+        //             }
+        //         }
+        //     },
+        // };
+        //
+        // let status_paragraph = Paragraph::new(vec![status_line]).block(status_block);
+        // f.render_widget(status_paragraph, vertical_chunks[1]);
+        
+        let timeline = Timeline {
+            progress: self.player_engine.read().unwrap().current_position(),
+            progress_display: self.player_engine.read().unwrap().current_position_display(),
+            total: self.player_engine.read().unwrap().duration(),
+            playing: !(self.player_engine.read().unwrap().is_paused()),
+            error: None,
         };
-
-        let status_paragraph = Paragraph::new(vec![status_line]).block(status_block);
-        f.render_widget(status_paragraph, vertical_chunks[1]);
+        f.render_widget(timeline, vertical_chunks[1]);
 
         let volume = self.player_engine.read().unwrap().get_volume() * 100.0;
         let volume_line = Line::from(vec![Span::styled(format!("Volume: {:.0}%", volume), Style::default().fg(ratatui::style::Color::Blue))]);

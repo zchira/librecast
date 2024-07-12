@@ -1,6 +1,4 @@
 use std::io::prelude::*;
-use std::io::BufReader;
-use std::time::Duration;
 use url2audio::Player;
 
 pub struct PlayerEngine {
@@ -41,9 +39,21 @@ impl PlayerEngine {
         }
         Ok(())
     }
+    
+    pub fn current_position(&self) -> f64 {
+        self.player.current_position()
+    }
+
+    pub fn current_position_display(&self) -> String {
+        self.player.current_position_display()
+    }
+
+    pub fn duration(&self) -> f64 {
+        self.player.duration()
+    }
 
     pub fn is_paused(&self) -> bool {
-        self.playing
+        !self.playing
     }
 
     pub fn pause(&mut self) {
@@ -86,45 +96,45 @@ impl PlayerEngine {
 
 }
 
-struct FifoRead {
-    pub reader: Box<dyn Read + Send + Sync + 'static>
-}
-
-impl FifoRead {
-    fn from_str(addr: &str) -> Result<Self, ureq::Error> {
-        let r = ureq::get(addr).call();
-        match r {
-            Ok(r) => {
-                Ok(
-                    FifoRead {
-                        reader: r.into_reader()
-                    }
-                  )
-            },
-            Err(e) => Err(e),
-        }
-    }
-
-    // fn new() -> Self {
-    //     FifoRead {
-    //         reader: ureq::get("https://stream.daskoimladja.com:9000/stream").call().unwrap().into_reader()
-    //     }
-    // }
-}
-
-impl Read for FifoRead {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-       self.reader.read(buf)
-    }
-}
-
-impl Seek for FifoRead {
-    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        match pos {
-            std::io::SeekFrom::Start(i) => {},
-            std::io::SeekFrom::End(_) => todo!(),
-            std::io::SeekFrom::Current(_) => todo!(),
-        }
-        Ok(0)
-    }
-}
+// struct FifoRead {
+//     pub reader: Box<dyn Read + Send + Sync + 'static>
+// }
+//
+// impl FifoRead {
+//     fn from_str(addr: &str) -> Result<Self, ureq::Error> {
+//         let r = ureq::get(addr).call();
+//         match r {
+//             Ok(r) => {
+//                 Ok(
+//                     FifoRead {
+//                         reader: r.into_reader()
+//                     }
+//                   )
+//             },
+//             Err(e) => Err(e),
+//         }
+//     }
+//
+//     // fn new() -> Self {
+//     //     FifoRead {
+//     //         reader: ureq::get("https://stream.daskoimladja.com:9000/stream").call().unwrap().into_reader()
+//     //     }
+//     // }
+// }
+//
+// impl Read for FifoRead {
+//     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+//        self.reader.read(buf)
+//     }
+// }
+//
+// impl Seek for FifoRead {
+//     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+//         match pos {
+//             std::io::SeekFrom::Start(i) => {},
+//             std::io::SeekFrom::End(_) => todo!(),
+//             std::io::SeekFrom::Current(_) => todo!(),
+//         }
+//         Ok(0)
+//     }
+// }

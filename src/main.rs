@@ -4,6 +4,7 @@ mod podcasts_model;
 mod config;
 mod entity;
 mod event_handler;
+mod widgets;
 
 use migration::{Migrator, MigratorTrait};
 use std::io::stdout;
