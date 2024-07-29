@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                         .col(ColumnDef::new(Channel::Id).integer().not_null().auto_increment().primary_key())
                         .col(ColumnDef::new(Channel::Title).string())
-                        .col(ColumnDef::new(Channel::Link).string())
+                        .col(ColumnDef::new(Channel::Link).unique_key().string())
                         .col(ColumnDef::new(Channel::Description).string())
                         // .foreign_key(
                         //     ForeignKey::create()
@@ -35,6 +35,8 @@ impl MigrationTrait for Migration {
                         .col(ColumnDef::new(ChannelItem::ChannelId).integer().not_null())
                         .col(ColumnDef::new(ChannelItem::Title).string())
                         .col(ColumnDef::new(ChannelItem::Link).string())
+                        .col(ColumnDef::new(ChannelItem::Source).string())
+                        .col(ColumnDef::new(ChannelItem::Enclosure).string())
                         .col(ColumnDef::new(ChannelItem::Description).string())
                         .col(ColumnDef::new(ChannelItem::Guid).uuid())
                         .col(ColumnDef::new(ChannelItem::PubDate).date_time())
@@ -109,6 +111,8 @@ enum ChannelItem {
     ChannelId,
     Title,
     Link,
+    Enclosure,
+    Source,
     Description,
     Guid,
     PubDate

@@ -4,18 +4,20 @@ mod podcasts_model;
 mod config;
 mod entity;
 mod event_handler;
+mod widgets;
 
+use migration::{Migrator, MigratorTrait};
 use std::io::stdout;
 use color_eyre::eyre;
-use crossterm::{terminal::{EnterAlternateScreen, enable_raw_mode, disable_raw_mode, LeaveAlternateScreen}, execute, event::{DisableMouseCapture, self, KeyEventKind, KeyEvent, KeyCode}, ExecutableCommand};
+use crossterm::{terminal::{EnterAlternateScreen, enable_raw_mode, disable_raw_mode, LeaveAlternateScreen}, execute, event::{DisableMouseCapture, KeyCode}, ExecutableCommand};
 use event_handler::Event;
 use podcasts_model::PodcastsModel;
 use radio_model::RadioModel;
 use ratatui::{Terminal, prelude::{CrosstermBackend, Backend, Layout, Direction}, Frame, widgets::{Block, Borders, ListState, Tabs}};
 use ratatui::layout::Constraint;
 use rss::Channel;
-use sea_orm::{Database, DatabaseConnection};
-use tokio::sync::mpsc;
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub struct App {
     radio_model: RadioModel,
@@ -37,7 +39,6 @@ impl App {
             .select(self.active_tab);
 
         f.render_widget(tabs, vertical_chunks[0]);
-
 
         match self.active_tab {
             0 => self.radio_model.ui(vertical_chunks[1], f),
@@ -73,7 +74,8 @@ impl App {
 }
 
 pub enum AsyncAction {
-    Channel(Channel)
+    Channel(Channel), // remove?
+    ChannelAdded(i32)
 }
 
 #[tokio::main]
@@ -85,14 +87,15 @@ pub async fn main() -> eyre::Result<()> {
 
     let home = std::env::var("HOME").unwrap();
     let connection = std::env::var("DATABASE_URL").unwrap_or(format!("sqlite://{}/.librecast.db?mode=rwc", home));
-    let db: DatabaseConnection = Database::connect(connection).await.unwrap();
+    let db: DatabaseConnection = Database::connect(connection).await?;
 
+    Migrator::up(&db, None).await?;
     // run tui
     let mut app = App {
         // streams_collection: vec!["https://stream.daskoimladja.com:9000/stream".to_string(), "https://live.radio.fake".to_string(), "test".to_string()],
         active_tab: 0,
         radio_model: Default::default(),
-        podcasts_model: PodcastsModel::new(db, action_tx)
+        podcasts_model: PodcastsModel::new(db.clone(), action_tx)
     };
     app.radio_model.streams_collection = config::load()?;
 
@@ -100,7 +103,7 @@ pub async fn main() -> eyre::Result<()> {
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
-    let _res = run_app(&mut terminal, &mut app).await?;
+    let _res = run_app(&mut terminal, &mut app, &mut action_rx, &db).await?;
 
     disable_raw_mode()?;
     execute!(
@@ -116,6 +119,8 @@ pub async fn main() -> eyre::Result<()> {
 async fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
+    action_rx: &mut UnboundedReceiver<AsyncAction>,
+    db: &DatabaseConnection
 ) -> eyre::Result<()> {
     loop {
         let mut events = event_handler::EventHandler::new();
@@ -130,23 +135,51 @@ async fn run_app<B: Backend>(
 
             let res = app.handle_events(event).await;
 
+            if let Ok(a) = action_rx.try_recv() {
+                match a {
+                    AsyncAction::Channel(_channel) => {},
+                    AsyncAction::ChannelAdded(id) => {
+                        // use entity::channel::{ Entity, ActiveModel };
+
+                        let items = entity::channel_item::Entity::find().filter(entity::channel_item::Column::ChannelId.eq(id)).all(db).await?;
+
+                        app.podcasts_model.items_collection.clear();
+                        items.iter().for_each(|i| {
+                            let item = rss::Item {
+                                title: i.title.clone(),
+                                link: i.link.clone(),
+                                description: i.description.clone(),
+                                author: None,
+                                categories: Default::default(),
+                                comments: None,
+                                enclosure: i.enclosure.as_ref().map(|s| rss::Enclosure{
+                                    url: s.to_string(),
+                                    length: "".to_string(),
+                                    mime_type: "".to_string(),
+                                }),
+                                guid: None,
+                                pub_date: i.pub_date.clone(),
+                                source: i.source.as_ref().map(|s| rss::Source { title: None, url: s.clone()}),
+                                content: None,
+                                extensions: Default::default(),
+                                itunes_ext: None,
+                                dublin_core_ext: None,
+                            };
+                            app.podcasts_model.items_collection.push(item);
+                        });
+                        if items.len() > 0 {
+                            app.podcasts_model.list_state_items.select(Some(0));
+                        }
+                    },
+                }
+
+
+            }
+
             if let Ok(true) = res {
                 return Ok(());
             }
 
         }
-
-        // terminal.draw(|f| app.ui(f))?; //  ui(f, app))?;
-        //
-        // if event::poll(std::time::Duration::from_millis(16))? {
-        //     if let event::Event::Key(key) = event::read()? {
-        //         if key.kind == KeyEventKind::Press {
-        //             if let Ok(true) = app.handle_events(key) {
-        //                 // exit
-        //                 return Ok(true);
-        //             }
-        //         }
-        //     }
-        // }
     }
 }
