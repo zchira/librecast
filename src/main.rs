@@ -16,7 +16,7 @@ use radio_model::RadioModel;
 use ratatui::{Terminal, prelude::{CrosstermBackend, Backend, Layout, Direction}, Frame, widgets::{Block, Borders, ListState, Tabs}};
 use ratatui::layout::Constraint;
 use rss::Channel;
-use sea_orm::{ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub struct App {

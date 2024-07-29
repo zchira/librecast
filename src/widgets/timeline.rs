@@ -5,6 +5,7 @@ pub struct Timeline {
     pub progress: f64,
     pub progress_display: String,
     pub total: f64,
+    pub total_display: String,
     pub playing: bool,
     pub error: Option<String>
 }
@@ -13,9 +14,9 @@ impl Widget for Timeline {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::buffer::Buffer)
     where Self: Sized {
         let ratio = if self.total > 0.0 {
-            30.0 + (self.progress / self.total)
+            self.progress / self.total
         } else {
-            0.4//0.0
+            0.4
         };
 
 
@@ -30,7 +31,7 @@ impl Widget for Timeline {
 
         let gauge = Gauge::default()
             .block(Block::bordered().title(playing_line)) //"Progress"))
-            .label(format!("{} - {}", self.progress_display, self.total))
+            .label(format!("{} - {}", self.progress_display, self.total_display))
             .gauge_style(
                 Style::default()
                 .fg(Color::Blue)

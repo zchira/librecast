@@ -52,6 +52,10 @@ impl PlayerEngine {
         self.player.duration()
     }
 
+    pub fn duration_display(&self) -> String {
+        self.player.duration_display()
+    }
+
     pub fn is_paused(&self) -> bool {
         !self.playing
     }
@@ -61,7 +65,8 @@ impl PlayerEngine {
         self.player.pause()
     }
 
-    pub fn resume(&self) {
+    pub fn resume(&mut self) {
+        self.playing = true;
         self.player.play()
     }
 

@@ -8,7 +8,7 @@ use tui_textbox::{Textbox, TextboxState};
 
 use std::error::Error;
 use rss::Channel;
-use crate::{AsyncAction, entity::{self, channel::Entity as ChannelEntity}, widgets::timeline::Timeline};
+use crate::{entity::{self, channel::Entity as ChannelEntity}, widgets::{simple_list::SimpleList, timeline::Timeline}, AsyncAction};
 
 use crate::{config, player_engine::PlayerEngine};
 
@@ -55,9 +55,7 @@ impl PodcastsModel {
     pub async fn get_channels_from_db(&self) -> Result<(), DbErr>  {
         let channels = ChannelEntity::find().all(&self.db).await?;
 
-
         Ok(())
-
     }
 
     pub async fn get_channel_from_url() -> Result<Channel, Box<dyn Error>> {
@@ -80,7 +78,6 @@ impl PodcastsModel {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(vertical_chunks[0]);
 
-        let status_block = Block::default().borders(Borders::ALL).title(format!("status"));
 
         // list channels
         let fg_color  = |i: usize| if self.active_list_state == i { ratatui::style::Color::Blue } else { ratatui::style::Color::DarkGray };
@@ -104,70 +101,40 @@ impl PodcastsModel {
 
         f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
 
-        // list items
-        // let active_item = match self.active_item.as_ref() {
-        //     Some(s) => s.clone(),
-        //     None => "".to_string(),
-        // };
         let selected = self.list_state_items.selected().unwrap_or(0);
         let offset = self.list_state_items.offset();
-        let v: Vec<rss::Item> = if self.items_collection.len() > self.list_state_items.offset() + 80 {
-            self.items_collection[offset.. offset + 80].into()
-        } else {
-            self.items_collection[..].into()
+
+        let simple_list = SimpleList {
+            fg_color: fg_color(1),
+            items: self.items_collection.clone().into_iter().enumerate().map(|(index, c)| {
+
+                if index < offset || index > offset + 80 {
+                    String::new()
+                } else if index == selected {
+                    format!("{} {}/{} 🎵", c.title.clone().unwrap_or("".to_string()), selected, offset)
+                } else {
+                    format!("{} [{}]", c.title.clone().unwrap_or("".to_string()), index)
+                }
+            }).collect(),
         };
+        f.render_stateful_widget(simple_list, horizontal_chunks[1], &mut self.list_state_items);
 
-        let list = List::new(v.into_iter().enumerate().map(|(index, c)| {
-            if index < offset || index > offset + 80 {
-                String::new()
-            } else if index == selected {
-                format!("{} {}/{} 🎵", c.title.clone().unwrap_or("".to_string()), selected, offset)
-            } else {
-                format!("{} [{}]", c.title.clone().unwrap_or("".to_string()), index)
-            }
-        }))
-        .fg(fg_color(1))
-        .block(Block::default().borders(Borders::ALL))
-            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-            .highlight_symbol(">> ")
-            .repeat_highlight_symbol(true);
+        //     .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+        //     .highlight_symbol(">> ")
+        //     .repeat_highlight_symbol(true);
 
-        f.render_stateful_widget(list, horizontal_chunks[1], &mut self.list_state_items);
-
-        // let status_line = match self.error.as_ref() {
-        //     Some(e) => {
-        //         Line::from(vec![
-        //             Span::styled(format!("Error: {}", e.to_string()), Style::default().fg(ratatui::style::Color::Red)),
-        //         ])
-        //     },
-        //     None => {
-        //         match self.active_channel.as_ref() {
-        //             Some(s) => {
-        //                 let play_char = if self.player_engine.read().unwrap().is_paused() { "Ⅱ" } else { "▶" };
-        //                 Line::from(vec![
-        //                     Span::styled(format!("{} {}", play_char, s), Style::default().fg(ratatui::style::Color::Blue)),
-        //                 ])
-        //             },
-        //             None => {
-        //                 Line::from(vec![
-        //                     Span::styled(format!("■"), Style::default()),
-        //                 ])
-        //             }
-        //         }
-        //     },
-        // };
-        //
-        // let status_paragraph = Paragraph::new(vec![status_line]).block(status_block);
-        // f.render_widget(status_paragraph, vertical_chunks[1]);
-        
-        let timeline = Timeline {
-            progress: self.player_engine.read().unwrap().current_position(),
-            progress_display: self.player_engine.read().unwrap().current_position_display(),
-            total: self.player_engine.read().unwrap().duration(),
-            playing: !(self.player_engine.read().unwrap().is_paused()),
-            error: None,
-        };
-        f.render_widget(timeline, vertical_chunks[1]);
+        {
+            let p = self.player_engine.read().unwrap();
+            let timeline = Timeline {
+                progress: p.current_position(),
+                progress_display: p.current_position_display(),
+                total: p.duration(),
+                total_display: p.duration_display(),
+                playing: !(p.is_paused()),
+                error: None,
+            };
+            f.render_widget(timeline, vertical_chunks[1]);
+        }
 
         let volume = self.player_engine.read().unwrap().get_volume() * 100.0;
         let volume_line = Line::from(vec![Span::styled(format!("Volume: {:.0}%", volume), Style::default().fg(ratatui::style::Color::Blue))]);
@@ -290,16 +257,32 @@ impl PodcastsModel {
                             }
                         });
 
-                        let _ = entity::channel_item::Entity::delete_many().filter(entity::channel_item::Column::ChannelId.eq(channel_id));
+                        let _ = entity::channel_item::Entity::delete_many().filter(entity::channel_item::Column::ChannelId.eq(channel_id)).exec(&db).await;
 
                         let _ = entity::channel_item::Entity::insert_many(items).exec(&db).await;
                         tx.send(AsyncAction::ChannelAdded(channel_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                     });
                 }
-                KeyCode::Char('k') => {
+                KeyCode::Char('.') => {
                     if self.active_item.is_some() {
                         let p = self.player_engine.read().unwrap();
                         p.seek_forward();
+                    }
+                }
+                KeyCode::Char(',') => {
+                    if self.active_item.is_some() {
+                        let p = self.player_engine.read().unwrap();
+                        p.seek_backward();
+                    }
+                }
+                KeyCode::Char(' ') => {
+                    if self.active_item.is_some() {
+                        let mut p = self.player_engine.write().unwrap();
+                        if p.is_paused() {
+                            p.resume();
+                        } else {
+                            p.pause();
+                        }
                     }
                 }
                 KeyCode::Left | KeyCode::Right => { 
