@@ -51,7 +51,7 @@ impl MigrationTrait for Migration {
                 )
             .await?;
 
-        self.seed_data(&manager).await?;
+        // self.seed_data(&manager).await?;
 
         Ok(())
     }

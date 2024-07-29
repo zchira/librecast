@@ -6,6 +6,7 @@ mod entity;
 mod event_handler;
 mod widgets;
 
+use entity::channel;
 use migration::{Migrator, MigratorTrait};
 use std::io::stdout;
 use color_eyre::eyre;
@@ -16,7 +17,7 @@ use radio_model::RadioModel;
 use ratatui::{Terminal, prelude::{CrosstermBackend, Backend, Layout, Direction}, Frame, widgets::{Block, Borders, ListState, Tabs}};
 use ratatui::layout::Constraint;
 use rss::Channel;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub struct App {
@@ -78,6 +79,32 @@ pub enum AsyncAction {
     ChannelAdded(i32)
 }
 
+async fn init_data(db: &DatabaseConnection) -> Result<(), DbErr>{
+    let res = channel::Entity::find().all(db).await?;
+    if res.len() > 0 {
+        return Ok(());
+    }
+
+    let c1 = channel::ActiveModel {
+        id: sea_orm::ActiveValue::NotSet,
+        title: sea_orm::ActiveValue::Set(Some("Dasko i Mladja".to_string())),
+        link: sea_orm::ActiveValue::Set(Some("https://podcast.daskoimladja.com/feed.xml".to_string())),
+        description: sea_orm::ActiveValue::Set(Some("fake...".to_string())),
+    };
+
+    c1.insert(db).await?;
+
+    let c2 = channel::ActiveModel {
+        id: sea_orm::ActiveValue::NotSet,
+        title: sea_orm::ActiveValue::Set(Some("Agelast".to_string())),
+        link: sea_orm::ActiveValue::Set(Some("https://feeds.transistor.fm/agelast-podcast".to_string())),
+        description: sea_orm::ActiveValue::Set(Some("fake...".to_string())),
+    };
+
+    c2.insert(db).await?;
+    Ok(())
+}
+
 #[tokio::main]
 pub async fn main() -> eyre::Result<()> {
     let (action_tx, mut action_rx) = mpsc::unbounded_channel::<AsyncAction>();
@@ -90,6 +117,7 @@ pub async fn main() -> eyre::Result<()> {
     let db: DatabaseConnection = Database::connect(connection).await?;
 
     Migrator::up(&db, None).await?;
+    init_data(&db).await?;
     // run tui
     let mut app = App {
         // streams_collection: vec!["https://stream.daskoimladja.com:9000/stream".to_string(), "https://live.radio.fake".to_string(), "test".to_string()],
@@ -98,6 +126,7 @@ pub async fn main() -> eyre::Result<()> {
         podcasts_model: PodcastsModel::new(db.clone(), action_tx)
     };
     app.radio_model.streams_collection = config::load()?;
+    app.podcasts_model.podcasts_collection = app.podcasts_model.get_channels_from_db().await?;
 
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
