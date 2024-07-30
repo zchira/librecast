@@ -8,7 +8,7 @@ use tui_textbox::{Textbox, TextboxState};
 
 use std::error::Error;
 use rss::Channel;
-use crate::{entity::{self, channel::Entity as ChannelEntity}, widgets::{simple_list::SimpleList, timeline::Timeline}, AsyncAction};
+use crate::{entity::{self, channel::Entity as ChannelEntity}, widgets::{simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -27,7 +27,9 @@ pub struct PodcastsModel {
     pub podcasts_collection: Vec<ChannelModel>,
     pub show_open_dialog: bool,
     pub textbox_state: TextboxState,
-    tx: UnboundedSender<crate::AsyncAction>
+    tx: UnboundedSender<crate::AsyncAction>,
+    pub waiting_dialog_state: WaitingMessageDialogState,
+    pub waiting_message: Option<String>,
 }
 
 
@@ -49,7 +51,9 @@ impl PodcastsModel {
             podcasts_collection: vec![], // "dasko i mladja".to_string(), "agelast".to_string()], // Default::default(),
             show_open_dialog: Default::default(),
             textbox_state: Default::default(),
-            tx
+            tx,
+            waiting_dialog_state: Default::default(),
+            waiting_message: None
         }
     }
 
@@ -137,20 +141,25 @@ impl PodcastsModel {
             f.render_widget(timeline, vertical_chunks[1]);
         }
 
-        let volume = self.player_engine.read().unwrap().get_volume() * 100.0;
-        let volume_line = Line::from(vec![Span::styled(format!("Volume: {:.0}%", volume), Style::default().fg(ratatui::style::Color::Blue))]);
-        let volume_paragraph = Paragraph::new(vec![volume_line]);
+        // let volume = self.player_engine.read().unwrap().get_volume() * 100.0;
+        // let volume_line = Line::from(vec![Span::styled(format!("Volume: {:.0}%", volume), Style::default().fg(ratatui::style::Color::Blue))]);
+        // let volume_paragraph = Paragraph::new(vec![volume_line]);
+        //
+        // let volume_area = Rect::new(vertical_chunks[1].width - 13, vertical_chunks[1].y + 1, 13, 1);
+        //
+        // f.render_widget(volume_paragraph, volume_area);
 
-        let volume_area = Rect::new(vertical_chunks[1].width - 13, vertical_chunks[1].y + 1, 13, 1);
-
-        f.render_widget(volume_paragraph, volume_area);
+        if let Some(waiting_message) = self.waiting_message.clone() {
+            let waiting = WaitingMessageDialog::new(waiting_message);
+            f.render_stateful_widget(waiting, vertical_chunks[0], &mut self.waiting_dialog_state);
+        }
 
         if self.show_open_dialog {
             let w = size.width - 5;
             let h = 8;
             let x = (size.width - w) / 2;
             let y = (size.height - h) / 3;
-            let open_dialog_block = Block::default().borders(Borders::ALL).title("Open stream").bg(Color::DarkGray);
+            let open_dialog_block = Block::default().borders(Borders::ALL).title("Add podcast").bg(Color::DarkGray);
 
             let dialog_rect = Rect { width: w, height: h, x, y };
             f.render_widget(open_dialog_block, dialog_rect);
@@ -218,13 +227,14 @@ impl PodcastsModel {
                 },
                 KeyCode::Char('r') => {
                     self.items_collection.clear();
-                    // self.items_collection.push("--reading--".to_string());
                     let tx = self.tx.clone();
                     let db = self.db.clone();
+
 
                     if let Some(selected) = self.list_state_channels.selected() {
                         let selected_channel = self.podcasts_collection[selected].clone();
                         if let Some(podcast_url) = selected_channel.link {
+                            self.waiting_message = Some("Fetching podcast info...".to_string());
                             tokio::spawn(async move {
                                 match PodcastsModel::get_channel_from_url(&podcast_url).await.map_err(|_| std::io::Error::new(ErrorKind::Other, "")) {
                                     Ok(channel) => {
@@ -233,7 +243,7 @@ impl PodcastsModel {
                                             title: ActiveValue::set(Some(channel.title().to_string())),
                                             link: ActiveValue::set(Some(channel.link().to_string())),
                                             description: ActiveValue::set(Some(channel.description().to_string())),
-                                            id: ActiveValue::NotSet
+                                            id: ActiveValue::set(selected_channel.id) // ActiveValue::NotSet
                                         };
 
                                         let exist = Entity::find().filter(entity::channel::Column::Link.eq(channel.link())).one(&db).await.unwrap();
@@ -241,9 +251,9 @@ impl PodcastsModel {
                                         let channel_id = if let Some(exist) = exist {
                                             exist.id
                                         } else {
-                                            // let res = Entity::update_many().filter(entity::channel::Column::Link.eq(channel.link())).exec(&db).await.unwrap();
-                                            let res = Entity::insert(am).exec(&db).await.unwrap();
-                                            res.last_insert_id
+                                            let res = Entity::update(am).exec(&db).await.unwrap();
+                                            res.id
+                                            // selected_channel.id // res.last_insert_id
                                         };
 
                                         let items = channel.items().iter().map(|i| {
@@ -264,6 +274,7 @@ impl PodcastsModel {
 
                                         let _ = entity::channel_item::Entity::insert_many(items).exec(&db).await;
                                         tx.send(AsyncAction::ChannelAdded(channel_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
+                                        tx.send(AsyncAction::RefreshChannelsList).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                                     },
                                     Err(e) => {
                                         // handle error opening channel
@@ -308,25 +319,17 @@ impl PodcastsModel {
                         // load items then move items list
                         self.active_list_state = self.active_list_state + 1;
                     } else {
-                        match self.active_item {
-                            Some(_) => {
-                                self.player_engine = Arc::new(RwLock::new(PlayerEngine::new()));
-                                self.active_item = None;
+                        let selected_episode = &self.items_collection[self.list_state_items.selected().unwrap_or_default()];
+                        self.active_item = Some(selected_episode.clone());
+                        let mut p = self.player_engine.write().unwrap();
+                        match p.open(&selected_episode.enclosure().unwrap().url) {
+                            Ok(_) => {
+                                self.error = None;
                             },
-                            None => {
-                                let selected_episode = &self.items_collection[self.list_state_items.selected().unwrap_or_default()];
-                                self.active_item = Some(selected_episode.clone());
-                                let mut p = self.player_engine.write().unwrap();
-                                match p.open(&selected_episode.enclosure().unwrap().url) {
-                                    Ok(_) => {
-                                        self.error = None;
-                                    },
-                                    Err(e) => self.error = Some(e.to_string()),
-                                }
-                            },
+                            Err(e) => self.error = Some(e.to_string()),
                         }
                     }
-                },
+                }
                 KeyCode::Char(' ') => {
                     if self.active_channel.is_some() {
                         let mut p = self.player_engine.write().unwrap();

@@ -76,7 +76,8 @@ impl App {
 
 pub enum AsyncAction {
     Channel(Channel), // remove?
-    ChannelAdded(i32)
+    ChannelAdded(i32),
+    RefreshChannelsList
 }
 
 async fn init_data(db: &DatabaseConnection) -> Result<(), DbErr>{
@@ -132,7 +133,12 @@ pub async fn main() -> eyre::Result<()> {
     enable_raw_mode()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
-    let _res = run_app(&mut terminal, &mut app, &mut action_rx, &db).await?;
+    let res = run_app(&mut terminal, &mut app, &mut action_rx, &db).await;
+
+    match res {
+        Ok(_) => {},
+        Err(e) => println!("{:#?}", e)
+    }
 
     disable_raw_mode()?;
     execute!(
@@ -168,8 +174,6 @@ async fn run_app<B: Backend>(
                 match a {
                     AsyncAction::Channel(_channel) => {},
                     AsyncAction::ChannelAdded(id) => {
-                        // use entity::channel::{ Entity, ActiveModel };
-
                         let items = entity::channel_item::Entity::find().filter(entity::channel_item::Column::ChannelId.eq(id)).all(db).await?;
 
                         app.podcasts_model.items_collection.clear();
@@ -199,7 +203,12 @@ async fn run_app<B: Backend>(
                         if items.len() > 0 {
                             app.podcasts_model.list_state_items.select(Some(0));
                         }
+
+                        app.podcasts_model.waiting_message = None;
                     },
+                    AsyncAction::RefreshChannelsList =>{
+                        app.podcasts_model.podcasts_collection = app.podcasts_model.get_channels_from_db().await?;
+                    }
                 }
 
 

@@ -24,7 +24,7 @@ impl Widget for Timeline {
         let play_char = if self.playing  {"▶" } else { "Ⅱ" };
 
         let playing_line = Line::from(vec![
-            Span::styled(format!("{} {} - {}", play_char, self.progress_display, self.title), Style::default().fg(ratatui::style::Color::Blue)),
+            Span::styled(format!("{} {}", play_char, self.title), Style::default().fg(ratatui::style::Color::Blue)),
         ]);
         // Line::from(vec![
         //     Span::styled(format!("■"), Style::default()),
