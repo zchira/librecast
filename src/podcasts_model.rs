@@ -135,7 +135,7 @@ impl PodcastsModel {
                 total: p.duration(),
                 total_display: p.duration_display(),
                 playing: !(p.is_paused()),
-                error: None,
+                error: p.get_error(),
                 title
             };
             f.render_widget(timeline, vertical_chunks[1]);
@@ -241,7 +241,7 @@ impl PodcastsModel {
                                         use entity::channel::{ Entity, ActiveModel };
                                         let am: ActiveModel = ActiveModel {
                                             title: ActiveValue::set(Some(channel.title().to_string())),
-                                            link: ActiveValue::set(Some(channel.link().to_string())),
+                                            link: ActiveValue::set(Some(podcast_url.to_string())),
                                             description: ActiveValue::set(Some(channel.description().to_string())),
                                             id: ActiveValue::set(selected_channel.id) // ActiveValue::NotSet
                                         };
@@ -261,7 +261,8 @@ impl PodcastsModel {
                                                 id: ActiveValue::NotSet,
                                                 channel_id: ActiveValue::set(channel_id),
                                                 title: ActiveValue::set(i.title().map(|t| t.to_string())),
-                                                link: ActiveValue::set(i.link().map(|l| l.to_string())),
+                                                // link: ActiveValue::set(i.link().map(|l| l.to_string())),
+                                                link: ActiveValue::set(Some(podcast_url.to_string())), // atom:link
                                                 source: ActiveValue::set(i.source().map(|s| s.url.to_string())),
                                                 enclosure: ActiveValue::set(i.enclosure().map(|e| e.url.to_string())),
                                                 description: ActiveValue::set(i.description().map(|d| d.to_string())),
@@ -317,6 +318,10 @@ impl PodcastsModel {
                 KeyCode::Enter => {
                     if self.active_list_state == 0 {
                         // load items then move items list
+                        if let Some(selected) = self.list_state_channels.selected() {
+                            let selected_channel = self.podcasts_collection[selected].clone();
+                            self.tx.send(AsyncAction::ChannelAdded(selected_channel.id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
+                        }
                         self.active_list_state = self.active_list_state + 1;
                     } else {
                         let selected_episode = &self.items_collection[self.list_state_items.selected().unwrap_or_default()];
@@ -410,4 +415,18 @@ impl PodcastsModel {
         }
     }
 
+}
+
+
+#[test]
+fn test_rss() {
+    let url = "https://podcast.daskoimladja.com/feed.xml";
+    let content = ureq::get(url).call().unwrap().into_string().unwrap();
+    let mut channel = Channel::from_str(&content).unwrap();
+    channel.set_items(vec![]);
+    let ext = channel.extensions().get("atom").and_then(|a| a.get("link"));
+
+    println!("channel: {:#?}", channel);
+    println!("-----------");
+    println!("{:#?}", ext);
 }
