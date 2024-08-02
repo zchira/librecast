@@ -17,7 +17,7 @@ impl Widget for Timeline {
         let ratio = if self.total > 0.0 {
             self.progress / self.total
         } else {
-            0.4
+            0.0
         };
 
 

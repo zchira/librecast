@@ -4,11 +4,10 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
 use sea_orm::{ActiveValue, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
 use tokio::sync::mpsc::UnboundedSender;
-use tui_textbox::{Textbox, TextboxState};
 
 use std::error::Error;
 use rss::Channel;
-use crate::{entity::{self, channel::Entity as ChannelEntity}, widgets::{simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{entity::{self, channel::Entity as ChannelEntity}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -26,10 +25,10 @@ pub struct PodcastsModel {
     pub player_engine: Arc<RwLock<PlayerEngine>>,
     pub podcasts_collection: Vec<ChannelModel>,
     pub show_open_dialog: bool,
-    pub textbox_state: TextboxState,
     tx: UnboundedSender<crate::AsyncAction>,
     pub waiting_dialog_state: WaitingMessageDialogState,
     pub waiting_message: Option<String>,
+    pub open_dialog_state: OpenDialogState,
 }
 
 
@@ -48,12 +47,12 @@ impl PodcastsModel {
             list_state_items: Default::default(),
             active_list_state: 0,
             player_engine: Default::default(),
-            podcasts_collection: vec![], // "dasko i mladja".to_string(), "agelast".to_string()], // Default::default(),
+            podcasts_collection: vec![],
             show_open_dialog: Default::default(),
-            textbox_state: Default::default(),
             tx,
             waiting_dialog_state: Default::default(),
-            waiting_message: None
+            waiting_message: None,
+            open_dialog_state: Default::default()
         }
     }
 
@@ -84,7 +83,6 @@ impl PodcastsModel {
         // list channels
         let fg_color  = |i: usize| if self.active_list_state == i { ratatui::style::Color::Blue } else { ratatui::style::Color::DarkGray };
 
-        // let active_channel = self.active_channel.clone();
         let list = List::new(self.podcasts_collection.clone().into_iter().map(|i| i.title.unwrap_or("-".to_string())))
         .fg(fg_color(0))
         .block(Block::default().borders(Borders::ALL))
@@ -95,7 +93,6 @@ impl PodcastsModel {
 
         f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
 
-        // let selected = self.list_state_items.selected().unwrap_or(0);
         let offset = self.list_state_items.offset();
 
         let simple_list = SimpleList {
@@ -155,30 +152,8 @@ impl PodcastsModel {
         }
 
         if self.show_open_dialog {
-            let w = size.width - 5;
-            let h = 8;
-            let x = (size.width - w) / 2;
-            let y = (size.height - h) / 3;
-            let open_dialog_block = Block::default().borders(Borders::ALL).title("Add podcast").bg(Color::DarkGray);
-
-            let dialog_rect = Rect { width: w, height: h, x, y };
-            f.render_widget(open_dialog_block, dialog_rect);
-
-            let textbox = Textbox::default();
-
-            f.render_stateful_widget(textbox, Rect::new(x + 1, y + 1, w - 2, 1), &mut self.textbox_state);
-
-            let mut lines = vec![];
-
-            let line = Line::from(vec![Span::styled("<Enter> - add stream", Style::default())]);
-            lines.push(line);
-
-            let line = Line::from(vec![Span::styled("<Esc> - cancel", Style::default())]);
-            lines.push(line);
-
-            let open_dialog_paragraph = Paragraph::new(lines); //.block(open_dialog_block);
-            let open_dialog_rect = Rect::new(x + 1, y + 3, w, h);
-            f.render_widget(open_dialog_paragraph, open_dialog_rect);
+            let open_dialog = OpenDialog::new("Add new podcast".to_string());
+            f.render_stateful_widget(open_dialog, size, &mut self.open_dialog_state);
         }
 
         if self.help_visible {
@@ -223,6 +198,7 @@ impl PodcastsModel {
         } else {
             match key.code {
                 KeyCode::Char('o') => {
+                    self.open_dialog_state.clear();
                     self.show_open_dialog = true;
                 },
                 KeyCode::Char('r') => {
@@ -401,7 +377,7 @@ impl PodcastsModel {
                 self.show_open_dialog = false;
             },
             (key_code, key_modifiers) => {
-                self.textbox_state.handle_events(key_code, key_modifiers);
+                self.open_dialog_state.handle_events(key_code, key_modifiers);
             }
         }
 
