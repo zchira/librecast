@@ -13,7 +13,7 @@ color-eyre = "0.6.3"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 futures = "0.3.30"
 home = "0.5.9"
-url2audio = "0.2.2"
+url2audio = "0.2.4"
 # url2audio = { path = "../url2audio" }
 ratatui = "0.27.0"
 rss = "2.0.7"
