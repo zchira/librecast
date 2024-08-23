@@ -85,6 +85,10 @@ impl PlayerEngine {
         1.0
     }
 
+    pub fn get_error(&self) -> Option<String> {
+        self.player.error()
+    }
+
     pub fn increase_volume(&mut self) {
         // if self.get_volume() < 1.0 {
         //     self.sink.set_volume(self.get_volume() + 0.1);
