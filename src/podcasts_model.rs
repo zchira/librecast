@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use std::error::Error;
 use rss::Channel;
-use crate::{entity::{self, channel::Entity as ChannelEntity}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{data_layer::data_provider::DataProvider, entity::{self, channel::Entity as ChannelEntity}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -212,55 +212,15 @@ impl PodcastsModel {
                         if let Some(podcast_url) = selected_channel.link {
                             self.waiting_message = Some("Fetching podcast info...".to_string());
                             tokio::spawn(async move {
-                                match PodcastsModel::get_channel_from_url(&podcast_url).await.map_err(|_| std::io::Error::new(ErrorKind::Other, "")) {
-                                    Ok(channel) => {
-                                        use entity::channel::{ Entity, ActiveModel };
-                                        let am: ActiveModel = ActiveModel {
-                                            title: ActiveValue::set(Some(channel.title().to_string())),
-                                            link: ActiveValue::set(Some(podcast_url.to_string())),
-                                            description: ActiveValue::set(Some(channel.description().to_string())),
-                                            id: ActiveValue::set(selected_channel.id) // ActiveValue::NotSet
-                                        };
-
-                                        let exist = Entity::find().filter(entity::channel::Column::Link.eq(channel.link())).one(&db).await.unwrap();
-
-                                        let channel_id = if let Some(exist) = exist {
-                                            exist.id
-                                        } else {
-                                            let res = Entity::update(am).exec(&db).await.unwrap();
-                                            res.id
-                                            // selected_channel.id // res.last_insert_id
-                                        };
-
-                                        let items = channel.items().iter().map(|i| {
-                                            entity::channel_item::ActiveModel {
-                                                id: ActiveValue::NotSet,
-                                                channel_id: ActiveValue::set(channel_id),
-                                                title: ActiveValue::set(i.title().map(|t| t.to_string())),
-                                                // link: ActiveValue::set(i.link().map(|l| l.to_string())),
-                                                link: ActiveValue::set(Some(podcast_url.to_string())), // atom:link
-                                                source: ActiveValue::set(i.source().map(|s| s.url.to_string())),
-                                                enclosure: ActiveValue::set(i.enclosure().map(|e| e.url.to_string())),
-                                                description: ActiveValue::set(i.description().map(|d| d.to_string())),
-                                                guid: ActiveValue::set(i.guid().map(|g| g.value.clone())),
-                                                pub_date: ActiveValue::set(i.pub_date().map(|d| d.to_string())),
-                                            }
-                                        });
-
-                                        let _ = entity::channel_item::Entity::delete_many().filter(entity::channel_item::Column::ChannelId.eq(channel_id)).exec(&db).await;
-
-                                        let _ = entity::channel_item::Entity::insert_many(items).exec(&db).await;
+                                match DataProvider::fetch_data(podcast_url, selected_channel.id, db).await {
+                                    Ok(channel_id) => {
                                         tx.send(AsyncAction::ChannelAdded(channel_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                                         tx.send(AsyncAction::RefreshChannelsList).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                                     },
-                                    Err(e) => {
-                                        // handle error opening channel
-                                        println!("{}", e);
-
-                                    }
-
+                                    Err(_) => {
+                                        // handle fetch error
+                                    },
                                 };
-
                             });
                         }
                     };

@@ -5,6 +5,7 @@ mod config;
 mod entity;
 mod event_handler;
 mod widgets;
+mod data_layer;
 
 use entity::channel;
 use migration::{Migrator, MigratorTrait};
@@ -19,6 +20,8 @@ use ratatui::layout::Constraint;
 use rss::Channel;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
+use data_layer::data_provider::DataProvider;
+
 
 pub struct App {
     radio_model: RadioModel,
@@ -174,44 +177,20 @@ async fn run_app<B: Backend>(
                 match a {
                     AsyncAction::Channel(_channel) => {},
                     AsyncAction::ChannelAdded(id) => {
-                        let items = entity::channel_item::Entity::find().filter(entity::channel_item::Column::ChannelId.eq(id)).all(db).await?;
-
+                        let mut items = DataProvider::get_items_from_db(id, db).await?;
+                        let items_len = items.len();
                         app.podcasts_model.items_collection.clear();
-                        items.iter().for_each(|i| {
-                            let item = rss::Item {
-                                title: i.title.clone(),
-                                link: i.link.clone(),
-                                description: i.description.clone(),
-                                author: None,
-                                categories: Default::default(),
-                                comments: None,
-                                enclosure: i.enclosure.as_ref().map(|s| rss::Enclosure{
-                                    url: s.to_string(),
-                                    length: "".to_string(),
-                                    mime_type: "".to_string(),
-                                }),
-                                guid: None,
-                                pub_date: i.pub_date.clone(),
-                                source: i.source.as_ref().map(|s| rss::Source { title: None, url: s.clone()}),
-                                content: None,
-                                extensions: Default::default(),
-                                itunes_ext: None,
-                                dublin_core_ext: None,
-                            };
-                            app.podcasts_model.items_collection.push(item);
-                        });
-                        if items.len() > 0 {
+                        app.podcasts_model.items_collection.append(&mut items);
+
+                        if items_len > 0 {
                             app.podcasts_model.list_state_items.select(Some(0));
                         }
-
                         app.podcasts_model.waiting_message = None;
                     },
                     AsyncAction::RefreshChannelsList =>{
                         app.podcasts_model.podcasts_collection = app.podcasts_model.get_channels_from_db().await?;
                     }
                 }
-
-
             }
 
             if let Ok(true) = res {
