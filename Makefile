@@ -18,7 +18,7 @@ migrate-fresh:
 	DATABASE_URL="$(DATABASE_URL_BASE)?mode=rwc" make -C migration fresh
 
 generate_entity:
-	sea-orm-cli generate entity  -u $(DATABASE_URL_BASE) -o src/entity
+	sea-orm-cli generate entity -u $(DATABASE_URL_BASE) -o src/entity
 
 sql:
 	sqlite3 $(DB_PATH)

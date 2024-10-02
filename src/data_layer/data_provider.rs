@@ -2,7 +2,8 @@
 // use crate::entity::channel::Model as ChannelModel;
 use crate::entity::{self, channel_item, listening_state};
 use crate::podcasts_model::PodcastsModel;
-use crate::ui_models::{self, ListeningState};
+use crate::ui_models;
+use chrono::FixedOffset;
 use sea_orm::{ActiveValue, Database, DatabaseConnection, DbErr, QueryOrder, QuerySelect};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::error::Error;
@@ -36,6 +37,10 @@ impl DataProvider {
                 let mut order = 0;
                 let items: Vec<_> = channel.items().iter().map(|i| {
                     order = order + 1;
+                    let d: Option<chrono::DateTime<FixedOffset>> = match chrono::DateTime::parse_from_rfc2822(i.pub_date().unwrap_or(Default::default())) {
+                        Ok(s) => Some(s),
+                        Err(_) => None,
+                    };
                     entity::channel_item::ActiveModel {
                         ordering: ActiveValue::set(order),
                         channel_id: ActiveValue::set(channel_id),
@@ -46,7 +51,7 @@ impl DataProvider {
                         enclosure: ActiveValue::set(i.enclosure().map(|e| e.url.to_string()).unwrap()),
                         description: ActiveValue::set(i.description().map(|d| d.to_string())),
                         guid: ActiveValue::set(i.guid().map(|g| g.value.clone())),
-                        pub_date: ActiveValue::set(i.pub_date().map(|d| d.to_string())),
+                        pub_date: ActiveValue::set(d)
                     }
                 }).collect();
 
@@ -71,8 +76,9 @@ impl DataProvider {
     pub async fn get_items_from_db(channel_id: i32, db: &DatabaseConnection) -> Result<Vec<ui_models::ChannelItem>, DbErr> {
         let items = entity::channel_item::Entity::find()
             .filter(entity::channel_item::Column::ChannelId.eq(channel_id))
-            .find_with_related(listening_state::Entity)
+            .order_by_desc(channel_item::Column::PubDate)
             .order_by_asc(channel_item::Column::Ordering)
+            .find_with_related(listening_state::Entity)
             .all(db).await?;
 
         let mut to_ret: Vec<ui_models::ChannelItem> = Default::default();

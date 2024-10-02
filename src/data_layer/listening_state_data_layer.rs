@@ -1,4 +1,3 @@
-use rss::Item;
 use sea_orm::ActiveValue;
 use sea_orm::DatabaseConnection;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -10,7 +9,7 @@ use crate::entity::listening_state::ActiveModel as ListeningStateModel;
 pub struct ListeningStateDataLayer {}
 
 impl ListeningStateDataLayer {
-    pub async fn create_listenitg_state_for_item(db: DatabaseConnection, enclosure_url: String, channel_id: i32, time: f64) {
+    pub async fn create_listenitg_state_for_item(db: DatabaseConnection, enclosure_url: String, channel_id: i32, time: f32) {
         let model = ListeningStateModel {
             id: ActiveValue::NotSet,
             channel_id: ActiveValue::set(channel_id),
@@ -47,7 +46,7 @@ impl ListeningStateDataLayer {
         }
     }
 
-    pub async fn update_current_time_for_item(db: DatabaseConnection, enclosure_url: String, channel_id: i32, time: f64) -> Result<(), sea_orm::DbErr> {
+    pub async fn update_current_time_for_item(db: DatabaseConnection, enclosure_url: String, channel_id: i32, time: f32) -> Result<(), sea_orm::DbErr> {
         let res = ListeningStateEntity::find()
             .filter(listening_state::Column::ChannelId.eq(channel_id))
             .filter(listening_state::Column::ChannelItemEnclosure.eq(enclosure_url))

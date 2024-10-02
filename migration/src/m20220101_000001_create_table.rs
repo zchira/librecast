@@ -38,7 +38,7 @@ impl MigrationTrait for Migration {
                         .col(ColumnDef::new(ChannelItem::Source).string())
                         .col(ColumnDef::new(ChannelItem::Enclosure).string().not_null().unique_key())
                         .col(ColumnDef::new(ChannelItem::Description).string())
-                        .col(ColumnDef::new(ChannelItem::Guid).uuid())
+                        .col(ColumnDef::new(ChannelItem::Guid).string())
                         .col(ColumnDef::new(ChannelItem::PubDate).timestamp_with_time_zone())
                         .primary_key(Index::create().col(ChannelItem::ChannelId).col(ChannelItem::Enclosure))
                         .foreign_key(
