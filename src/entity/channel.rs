@@ -16,11 +16,22 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::channel_item::Entity")]
     ChannelItem,
+    #[sea_orm(has_many = "super::listening_state::Entity")]
+    ListeningState,
 }
 
 impl Related<super::channel_item::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ChannelItem.def()
+    }
+}
+
+impl Related<super::listening_state::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::channel_item::Relation::ListeningState.def()
+    }
+    fn via() -> Option<RelationDef> {
+        Some(super::channel_item::Relation::Channel.def().rev())
     }
 }
 

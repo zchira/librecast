@@ -6,6 +6,7 @@ mod entity;
 mod event_handler;
 mod widgets;
 mod data_layer;
+mod ui_models;
 
 use entity::channel;
 use migration::{Migrator, MigratorTrait};

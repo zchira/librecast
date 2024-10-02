@@ -1,4 +1,4 @@
-use sea_orm_migration::prelude::*;
+use sea_orm_migration::{prelude::*, seaql_migrations::PrimaryKey};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -31,15 +31,16 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(ChannelItem::Table)
                     .if_not_exists()
-                        .col(ColumnDef::new(ChannelItem::Id).integer().not_null().auto_increment().primary_key())
+                        .col(ColumnDef::new(ChannelItem::Ordering).integer().not_null())
                         .col(ColumnDef::new(ChannelItem::ChannelId).integer().not_null())
                         .col(ColumnDef::new(ChannelItem::Title).string())
                         .col(ColumnDef::new(ChannelItem::Link).string())
                         .col(ColumnDef::new(ChannelItem::Source).string())
-                        .col(ColumnDef::new(ChannelItem::Enclosure).string())
+                        .col(ColumnDef::new(ChannelItem::Enclosure).string().not_null().unique_key())
                         .col(ColumnDef::new(ChannelItem::Description).string())
                         .col(ColumnDef::new(ChannelItem::Guid).uuid())
-                        .col(ColumnDef::new(ChannelItem::PubDate).date_time())
+                        .col(ColumnDef::new(ChannelItem::PubDate).timestamp_with_time_zone())
+                        .primary_key(Index::create().col(ChannelItem::ChannelId).col(ChannelItem::Enclosure))
                         .foreign_key(
                             ForeignKey::create()
                                 .name("fk_channel")
@@ -51,7 +52,32 @@ impl MigrationTrait for Migration {
                 )
             .await?;
 
-        // self.seed_data(&manager).await?;
+        manager
+            .create_table(
+                Table::create()
+                    .table(ListeningState::Table)
+                    .if_not_exists()
+                        .col(ColumnDef::new(ListeningState::Id).integer().not_null().auto_increment().primary_key())
+                        .col(ColumnDef::new(ListeningState::ChannelId).integer().not_null())
+                        .col(ColumnDef::new(ListeningState::ChannelItemEnclosure).not_null().string())
+                        .col(ColumnDef::new(ListeningState::Time).float().not_null().default(0.0))
+                        .col(ColumnDef::new(ListeningState::Finished).boolean().not_null().default(false))
+                        .foreign_key(
+                            ForeignKey::create()
+                                .name("fk_channel")
+                                .from(ListeningState::Table, ListeningState::ChannelId)
+                                .to(Channel::Table, Channel::Id)
+                                .on_delete(ForeignKeyAction::Cascade)
+                            )
+                        .foreign_key(
+                            ForeignKey::create()
+                                .name("fk_enclosure")
+                                .from(ListeningState::Table, ListeningState::ChannelItemEnclosure)
+                                .to(ChannelItem::Table, ChannelItem::Enclosure)
+                            )
+                        .to_owned()
+                )
+            .await?;
 
         Ok(())
     }
@@ -63,6 +89,10 @@ impl MigrationTrait for Migration {
 
         manager
             .drop_table(Table::drop().table(ChannelItem::Table).to_owned())
+            .await?;
+
+        manager
+            .drop_table(Table::drop().table(ListeningState::Table).to_owned())
             .await?;
 
         Ok(())
@@ -107,14 +137,28 @@ enum Channel {
 #[derive(DeriveIden)]
 enum ChannelItem {
     Table,
-    Id,
+    Ordering,
     ChannelId,
+    Enclosure,
     Title,
     Link,
-    Enclosure,
     Source,
     Description,
     Guid,
     PubDate
 }
+
+#[derive(DeriveIden)]
+enum ListeningState {
+    Table,
+    Id,
+    ChannelId,
+    ChannelItemEnclosure,
+    Time,
+    Finished
+}
+
+
+
+
 

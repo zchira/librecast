@@ -1,12 +1,15 @@
 use ratatui::{prelude::*, widgets::*};
 use ratatui::style::Color;
 
-pub struct SimpleList {
-    pub items: Vec<String>,
-    pub fg_color: Color,
+use crate::ui_models;
+
+pub struct SimpleList<'a> {
+    pub items: &'a Vec<ui_models::ChannelItem>,
+    pub active: &'a Option<ui_models::ChannelItem>,
+    pub fg_color: Color
 }
 
-impl StatefulWidget for SimpleList {
+impl<'a> StatefulWidget for SimpleList<'a> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
@@ -27,7 +30,7 @@ impl StatefulWidget for SimpleList {
             }
 
             if selected >= state.offset() + num_of_visible {
-                *state.offset_mut() = selected - num_of_visible + 1; //state.offset() + 1;
+                *state.offset_mut() = selected - num_of_visible + 1;
             }
         }
 
@@ -36,14 +39,14 @@ impl StatefulWidget for SimpleList {
 
         let mut dx = 1;
         for i in start..end {
-            let text = &self.items[i];
+            let text = &self.items[i].title.clone().unwrap_or("".to_string());
             let style = if i == sel_index {
                 Style::default().fg(self.fg_color).reversed()
             } else {
                 Style::default().fg(self.fg_color)
             };
 
-            buf.set_string(area.x + 1,area.y + dx , text, style);
+            buf.set_string(area.x + 1,area.y + dx , text.to_string(), style);
             dx = dx + 1;
         }
 

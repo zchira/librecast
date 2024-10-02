@@ -2,12 +2,12 @@ use std::{borrow::BorrowMut, io::ErrorKind, str::FromStr, sync::{Arc, RwLock}};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
-use sea_orm::{ActiveValue, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
 use tokio::sync::mpsc::UnboundedSender;
 
 use std::error::Error;
 use rss::Channel;
-use crate::{data_layer::data_provider::DataProvider, entity::{self, channel::Entity as ChannelEntity}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{data_layer::data_provider::DataProvider, entity::channel::Entity as ChannelEntity, ui_models, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -16,9 +16,9 @@ pub struct PodcastsModel {
     db: DatabaseConnection,
     help_visible: bool,
     pub active_channel: Option<ChannelModel>,
-    pub active_item: Option<rss::Item>,
+    pub active_item: Option<ui_models::ChannelItem>,
     pub error: Option<String>,
-    pub items_collection: Vec<rss::Item>,
+    pub items_collection: Vec<ui_models::ChannelItem>,
     pub list_state_channels: ListState,
     pub list_state_items: ListState,
     pub active_list_state: usize,
@@ -93,30 +93,12 @@ impl PodcastsModel {
 
         f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
 
-        let offset = self.list_state_items.offset();
-
         let simple_list = SimpleList {
+            items: &self.items_collection,
+            active: &self.active_item,
             fg_color: fg_color(1),
-            items: self.items_collection.clone().into_iter().enumerate().map(|(index, c)| {
-
-                if index < offset || index > offset + horizontal_chunks[1].height as usize + 5 {
-                    String::new()
-                } else {
-                    match self.active_item.clone() {
-                        Some(active_item) => {
-                            if c == active_item {
-                                format!("🎵 {} 🎵", c.title.clone().unwrap_or("".to_string()))
-                            } else {
-                                format!("{}", c.title.clone().unwrap_or("".to_string()))
-                            }
-                        },
-                        None => {
-                            format!("{}", c.title.clone().unwrap_or("".to_string()))
-                        }
-                    }
-                }
-            }).collect(),
         };
+
         f.render_stateful_widget(simple_list, horizontal_chunks[1], &mut self.list_state_items);
 
         {
@@ -206,7 +188,6 @@ impl PodcastsModel {
                     let tx = self.tx.clone();
                     let db = self.db.clone();
 
-
                     if let Some(selected) = self.list_state_channels.selected() {
                         let selected_channel = self.podcasts_collection[selected].clone();
                         if let Some(podcast_url) = selected_channel.link {
@@ -217,8 +198,9 @@ impl PodcastsModel {
                                         tx.send(AsyncAction::ChannelAdded(channel_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                                         tx.send(AsyncAction::RefreshChannelsList).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                                     },
-                                    Err(_) => {
+                                    Err(e) => {
                                         // handle fetch error
+                                        println!("Err fetching {:#?}", e)
                                     },
                                 };
                             });
@@ -263,21 +245,11 @@ impl PodcastsModel {
                         let selected_episode = &self.items_collection[self.list_state_items.selected().unwrap_or_default()];
                         self.active_item = Some(selected_episode.clone());
                         let mut p = self.player_engine.write().unwrap();
-                        match p.open(&selected_episode.enclosure().unwrap().url) {
+                        match p.open(&selected_episode.enclosure) {
                             Ok(_) => {
                                 self.error = None;
                             },
                             Err(e) => self.error = Some(e.to_string()),
-                        }
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    if self.active_channel.is_some() {
-                        let mut p = self.player_engine.write().unwrap();
-                        if p.is_paused() {
-                            p.resume()
-                        } else {
-                            p.pause()
                         }
                     }
                 },
@@ -354,7 +326,7 @@ impl PodcastsModel {
 }
 
 
-#[test]
+// #[test]
 fn test_rss() {
     let url = "https://podcast.daskoimladja.com/feed.xml";
     let content = ureq::get(url).call().unwrap().into_string().unwrap();

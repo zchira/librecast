@@ -5,13 +5,14 @@ use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "channel_item")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: i32,
+    pub ordering: i32,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub channel_id: i32,
     pub title: Option<String>,
     pub link: Option<String>,
     pub source: Option<String>,
-    pub enclosure: Option<String>,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub enclosure: String,
     pub description: Option<String>,
     pub guid: Option<String>,
     pub pub_date: Option<String>,
@@ -27,11 +28,19 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Channel,
+    #[sea_orm(has_many = "super::listening_state::Entity")]
+    ListeningState,
 }
 
 impl Related<super::channel::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Channel.def()
+    }
+}
+
+impl Related<super::listening_state::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ListeningState.def()
     }
 }
 
