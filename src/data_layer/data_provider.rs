@@ -4,8 +4,8 @@ use crate::entity::{self, channel_item, listening_state};
 use crate::podcasts_model::PodcastsModel;
 use crate::ui_models;
 use chrono::FixedOffset;
-use sea_orm::{ActiveValue, Database, DatabaseConnection, DbErr, QueryOrder, QuerySelect};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveValue, Database, DatabaseConnection, DbErr, QueryOrder, QuerySelect, QueryTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationDef, Linked};
 use std::error::Error;
 use std::io::ErrorKind;
 
@@ -78,7 +78,7 @@ impl DataProvider {
             .filter(entity::channel_item::Column::ChannelId.eq(channel_id))
             .order_by_desc(channel_item::Column::PubDate)
             .order_by_asc(channel_item::Column::Ordering)
-            .find_with_related(listening_state::Entity)
+            .find_also_linked(ChannelItemToListeningState)
             .all(db).await?;
 
         let mut to_ret: Vec<ui_models::ChannelItem> = Default::default();
@@ -91,20 +91,34 @@ impl DataProvider {
     }
 }
 
-impl From<&(entity::channel_item::Model, Vec<listening_state::Model>)> for ui_models::ChannelItem {
-    fn from(entry: &(entity::channel_item::Model, Vec<listening_state::Model>)) -> Self {
+pub struct ChannelItemToListeningState;
+
+impl Linked for ChannelItemToListeningState {
+    type FromEntity = channel_item::Entity;
+    type ToEntity = listening_state::Entity;
+
+    fn link(&self) -> Vec<RelationDef> {
+        vec![
+            channel_item::Entity::belongs_to(listening_state::Entity)
+                .from(channel_item::Column::Enclosure)
+                .to(listening_state::Column::ChannelItemEnclosure)
+                .into(),
+        ]
+    }
+}
+
+
+impl From<&(entity::channel_item::Model, Option<listening_state::Model>)> for ui_models::ChannelItem {
+    fn from(entry: &(entity::channel_item::Model, Option<listening_state::Model>)) -> Self {
         let i = entry.0.clone();
-        let listening_state = if entry.1.len() > 0 {
-            let ls = entry.1.get(0);
-            match ls {
-                Some(e) => Some(ui_models::ListeningState {
-                    time: e.time,
-                    finished: e.finished,
-                }),
-                None => None,
-            }
-        } else {
-            None
+        let listening_state = match entry.1.as_ref() {
+            Some(ls) => {
+                Some(ui_models::ListeningState {
+                    time: ls.time,
+                    finished: ls.finished
+                })
+            },
+            None => None
         };
 
         let item = ui_models::ChannelItem {
@@ -123,7 +137,7 @@ impl From<&(entity::channel_item::Model, Vec<listening_state::Model>)> for ui_mo
     }
 }
 
-#[tokio::test]
+// #[tokio::test]
 async fn test_get_items_with_state() -> Result<(), DbErr> {
 
     let home = std::env::var("HOME").unwrap();
@@ -145,7 +159,7 @@ async fn test_get_items_with_state() -> Result<(), DbErr> {
     Ok(())
 }
 
-// #[tokio::test]
+#[tokio::test]
 async fn test_join() -> Result<(), DbErr> {
 
     let home = std::env::var("HOME").unwrap();

@@ -29,10 +29,7 @@ impl Related<super::channel_item::Entity> for Entity {
 
 impl Related<super::listening_state::Entity> for Entity {
     fn to() -> RelationDef {
-        super::channel_item::Relation::ListeningState.def()
-    }
-    fn via() -> Option<RelationDef> {
-        Some(super::channel_item::Relation::Channel.def().rev())
+        Relation::ListeningState.def()
     }
 }
 

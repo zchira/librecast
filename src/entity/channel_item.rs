@@ -28,19 +28,11 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Channel,
-    #[sea_orm(has_many = "super::listening_state::Entity")]
-    ListeningState,
 }
 
 impl Related<super::channel::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Channel.def()
-    }
-}
-
-impl Related<super::listening_state::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ListeningState.def()
     }
 }
 

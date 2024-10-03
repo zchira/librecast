@@ -24,28 +24,11 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Channel,
-    #[sea_orm(
-        belongs_to = "super::channel_item::Entity",
-        from = "Column::ChannelItemEnclosure",
-        to = "super::channel_item::Column::Enclosure",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    ChannelItem,
-}
-
-impl Related<super::channel_item::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ChannelItem.def()
-    }
 }
 
 impl Related<super::channel::Entity> for Entity {
     fn to() -> RelationDef {
-        super::channel_item::Relation::Channel.def()
-    }
-    fn via() -> Option<RelationDef> {
-        Some(super::channel_item::Relation::ListeningState.def().rev())
+        Relation::Channel.def()
     }
 }
 
