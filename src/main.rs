@@ -10,6 +10,7 @@ mod ui_models;
 
 use entity::channel;
 use migration::{Migrator, MigratorTrait};
+use ui_models::ChannelItem;
 use std::io::stdout;
 use color_eyre::eyre;
 use crossterm::{terminal::{EnterAlternateScreen, enable_raw_mode, disable_raw_mode, LeaveAlternateScreen}, execute, event::{DisableMouseCapture, KeyCode}, ExecutableCommand};
@@ -21,7 +22,7 @@ use ratatui::layout::Constraint;
 use rss::Channel;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
-use data_layer::data_provider::DataProvider;
+use data_layer::{data_provider::DataProvider, listening_state_data_layer::ListeningStateDataLayer};
 
 
 pub struct App {
@@ -81,7 +82,8 @@ impl App {
 pub enum AsyncAction {
     Channel(Channel), // remove?
     ChannelAdded(i32),
-    RefreshChannelsList
+    RefreshChannelsList,
+    WriteListeningState(ChannelItem)
 }
 
 async fn init_data(db: &DatabaseConnection) -> Result<(), DbErr>{
@@ -178,19 +180,29 @@ async fn run_app<B: Backend>(
                 match a {
                     AsyncAction::Channel(_channel) => {},
                     AsyncAction::ChannelAdded(id) => {
-                        let mut items = DataProvider::get_items_from_db(id, db).await?;
+                        let mut items = DataProvider::get_items_from_db(id, &db.clone()).await?;
                         let items_len = items.len();
                         app.podcasts_model.items_collection.clear();
                         app.podcasts_model.items_collection.append(&mut items);
 
-                        if items_len > 0 {
-                            app.podcasts_model.list_state_items.select(Some(0));
-                        }
+                        // if items_len > 0 {
+                        //     app.podcasts_model.list_state_items.select(Some(0));
+                        // }
                         app.podcasts_model.waiting_message = None;
                     },
                     AsyncAction::RefreshChannelsList =>{
                         app.podcasts_model.podcasts_collection = app.podcasts_model.get_channels_from_db().await?;
-                    }
+                    },
+                    AsyncAction::WriteListeningState(channel_item) => {
+                        match channel_item.listening_state.as_ref() {
+                            Some(ls) => {
+                                let _ = ListeningStateDataLayer::update_current_time_for_item(db.clone(),
+                                    channel_item.enclosure, channel_item.channel_id, ls.time).await;
+                            },
+                            None => {},
+                        }
+                        
+                    },
                 }
             }
 

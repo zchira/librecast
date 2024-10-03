@@ -123,7 +123,7 @@ impl From<&(entity::channel_item::Model, Vec<listening_state::Model>)> for ui_mo
     }
 }
 
-// #[tokio::test]
+#[tokio::test]
 async fn test_get_items_with_state() -> Result<(), DbErr> {
 
     let home = std::env::var("HOME").unwrap();
@@ -131,11 +131,11 @@ async fn test_get_items_with_state() -> Result<(), DbErr> {
     let db: DatabaseConnection = Database::connect(connection).await?;
 
     let enclosure_url = "https://media.transistor.fm/dd1e8e10/db7f2e6d.mp3".to_string();
-    crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::create_listenitg_state_for_item(db.clone(), enclosure_url, 2, 5.0).await;
+    crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::update_current_time_for_item(db.clone(), enclosure_url, 2, 5.0).await;
 
 
     let enclosure_url = "https://media.transistor.fm/59bdd3e8/20064bdc.mp3".to_string();
-    crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::create_listenitg_state_for_item(db.clone(), enclosure_url.clone(), 2, 5.0).await;
+    crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::update_current_time_for_item(db.clone(), enclosure_url.clone(), 2, 5.0).await;
     let _ = crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::mark_item_as_finished(db.clone(), enclosure_url, 2).await;
 
 
@@ -145,7 +145,7 @@ async fn test_get_items_with_state() -> Result<(), DbErr> {
     Ok(())
 }
 
-#[tokio::test]
+// #[tokio::test]
 async fn test_join() -> Result<(), DbErr> {
 
     let home = std::env::var("HOME").unwrap();

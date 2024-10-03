@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use std::error::Error;
 use rss::Channel;
-use crate::{data_layer::data_provider::DataProvider, entity::channel::Entity as ChannelEntity, ui_models, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{data_layer::data_provider::DataProvider, entity::{channel::Entity as ChannelEntity, listening_state}, ui_models::{self, ChannelItem, ListeningState}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -90,9 +90,9 @@ impl PodcastsModel {
             .highlight_symbol("> ")
             .repeat_highlight_symbol(true);
 
-
         f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
 
+        // list channel items
         let simple_list = SimpleList {
             items: &self.items_collection,
             active: &self.active_item,
@@ -101,6 +101,7 @@ impl PodcastsModel {
 
         f.render_stateful_widget(simple_list, horizontal_chunks[1], &mut self.list_state_items);
 
+        // timeline
         {
             let title = if self.active_item.is_some() {
                 self.active_item.clone().unwrap().title.unwrap_or("".to_string())
@@ -226,6 +227,7 @@ impl PodcastsModel {
                             p.resume();
                         } else {
                             p.pause();
+                            self.write_listening_state(p.current_position() as f32);
                         }
                     }
                 }
@@ -242,12 +244,20 @@ impl PodcastsModel {
                         }
                         self.active_list_state = self.active_list_state + 1;
                     } else {
+                        let mut p = self.player_engine.write().unwrap();
+                        self.write_listening_state(p.current_position() as f32);
                         let selected_episode = &self.items_collection[self.list_state_items.selected().unwrap_or_default()];
                         self.active_item = Some(selected_episode.clone());
-                        let mut p = self.player_engine.write().unwrap();
+
                         match p.open(&selected_episode.enclosure) {
                             Ok(_) => {
                                 self.error = None;
+                                match selected_episode.listening_state.as_ref() {
+                                    Some(ls) => {
+                                        p.seek(ls.time as f64);
+                                    },
+                                    None => (),
+                                }
                             },
                             Err(e) => self.error = Some(e.to_string()),
                         }
@@ -297,7 +307,26 @@ impl PodcastsModel {
             }
             Ok(false)
         }
+    }
 
+    fn write_listening_state(&self, time: f32) {
+        match self.active_item.as_ref() {
+            Some(active_item) => {
+                let mut ci = active_item.clone();
+                ci.listening_state = Some(ListeningState {
+                        time,
+                        finished: false,
+                    });
+                let _ = self.tx.send(AsyncAction::WriteListeningState(ci));
+
+                if let Some(selected) = self.list_state_channels.selected() {
+                    let selected_channel = self.podcasts_collection[selected].clone();
+                    self.tx.send(AsyncAction::ChannelAdded(selected_channel.id))
+                        .map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
+                }
+            },
+            None => (),
+        }
     }
 
     fn handle_open_dialog_events(&mut self, key: KeyEvent) -> std::io::Result<bool> {

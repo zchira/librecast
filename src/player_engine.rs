@@ -69,6 +69,10 @@ impl PlayerEngine {
         self.player.play()
     }
 
+    pub fn seek(&self, time: f64) {
+        self.player.seek(time);
+    }
+
     /// seek 30 seconds forward
     pub fn seek_forward(&self) {
         self.player.seek_relative(30.0);
