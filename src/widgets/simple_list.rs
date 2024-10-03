@@ -1,4 +1,6 @@
-use ratatui::{buffer::Buffer, layout::Rect, style::{Color, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, ListState, StatefulWidget, Widget}};
+use color_eyre::owo_colors::OwoColorize;
+use crossterm::style;
+use ratatui::{buffer::Buffer, layout::Rect, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, ListState, StatefulWidget, Widget}};
 
 use crate::ui_models;
 
@@ -66,10 +68,11 @@ impl<'a> StatefulWidget for SimpleList<'a> {
             };
             dx = dx + 1;
 
-            let style = if i == sel_index {
-                Style::default().fg(self.fg_color).reversed()
-            } else {
-                Style::default().fg(self.fg_color)
+            let style = match (playing, i == sel_index) {
+                (true, true) => Style::default().bg(self.fg_color).white().bold(),
+                (true, false) => Style::default().white().bold(),
+                (false, true) => Style::default().fg(self.fg_color).reversed(),
+                (false, false) => Style::default().fg(self.fg_color)
             };
 
             let item_state = match self.items[i].listening_state.as_ref() {

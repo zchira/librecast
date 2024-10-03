@@ -234,7 +234,11 @@ impl PodcastsModel {
                 KeyCode::Left | KeyCode::Right => { 
                     self.active_list_state = (self.active_list_state + 1) % 2;
                 }
-                KeyCode::Char('q') => return Ok(true),
+                // KeyCode::Char('q') => {
+                //     let time = self.player_engine.read().unwrap().current_position();
+                //     self.write_listening_state(time as f32);
+                //     return Ok(true);
+                // },
                 KeyCode::Enter => {
                     if self.active_list_state == 0 {
                         // load items then move items list

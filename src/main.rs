@@ -185,9 +185,16 @@ async fn run_app<B: Backend>(
                         app.podcasts_model.items_collection.clear();
                         app.podcasts_model.items_collection.append(&mut items);
 
-                        // if items_len > 0 {
-                        //     app.podcasts_model.list_state_items.select(Some(0));
-                        // }
+                        let select_item = match app.podcasts_model.active_item.as_ref() {
+                            Some(ai) => {
+                                ai.channel_id != id
+                            },
+                            None => true,
+                        };
+
+                        if items_len > 0 && select_item{
+                            app.podcasts_model.list_state_items.select(Some(0));
+                        }
                         app.podcasts_model.waiting_message = None;
                     },
                     AsyncAction::RefreshChannelsList =>{
