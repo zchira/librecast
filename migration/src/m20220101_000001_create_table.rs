@@ -69,12 +69,12 @@ impl MigrationTrait for Migration {
                                 .to(Channel::Table, Channel::Id)
                                 .on_delete(ForeignKeyAction::Cascade)
                             )
-                        .foreign_key(
-                            ForeignKey::create()
-                                .name("fk_enclosure")
-                                .from(ListeningState::Table, ListeningState::ChannelItemEnclosure)
-                                .to(ChannelItem::Table, ChannelItem::Enclosure)
-                            )
+                        // .foreign_key(
+                        //     ForeignKey::create()
+                        //         .name("fk_enclosure")
+                        //         .from(ListeningState::Table, ListeningState::ChannelItemEnclosure)
+                        //         .to(ChannelItem::Table, ChannelItem::Enclosure)
+                        //     )
                         .to_owned()
                 )
             .await?;
