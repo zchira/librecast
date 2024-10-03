@@ -5,9 +5,12 @@ mod config;
 mod entity;
 mod event_handler;
 mod widgets;
+mod data_layer;
+mod ui_models;
 
 use entity::channel;
 use migration::{Migrator, MigratorTrait};
+use ui_models::ChannelItem;
 use std::io::stdout;
 use color_eyre::eyre;
 use crossterm::{terminal::{EnterAlternateScreen, enable_raw_mode, disable_raw_mode, LeaveAlternateScreen}, execute, event::{DisableMouseCapture, KeyCode}, ExecutableCommand};
@@ -19,6 +22,8 @@ use ratatui::layout::Constraint;
 use rss::Channel;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
+use data_layer::{data_provider::DataProvider, listening_state_data_layer::ListeningStateDataLayer};
+
 
 pub struct App {
     radio_model: RadioModel,
@@ -77,7 +82,8 @@ impl App {
 pub enum AsyncAction {
     Channel(Channel), // remove?
     ChannelAdded(i32),
-    RefreshChannelsList
+    RefreshChannelsList,
+    WriteListeningState(ChannelItem)
 }
 
 async fn init_data(db: &DatabaseConnection) -> Result<(), DbErr>{
@@ -174,44 +180,37 @@ async fn run_app<B: Backend>(
                 match a {
                     AsyncAction::Channel(_channel) => {},
                     AsyncAction::ChannelAdded(id) => {
-                        let items = entity::channel_item::Entity::find().filter(entity::channel_item::Column::ChannelId.eq(id)).all(db).await?;
-
+                        let mut items = DataProvider::get_items_from_db(id, &db.clone()).await?;
+                        let items_len = items.len();
                         app.podcasts_model.items_collection.clear();
-                        items.iter().for_each(|i| {
-                            let item = rss::Item {
-                                title: i.title.clone(),
-                                link: i.link.clone(),
-                                description: i.description.clone(),
-                                author: None,
-                                categories: Default::default(),
-                                comments: None,
-                                enclosure: i.enclosure.as_ref().map(|s| rss::Enclosure{
-                                    url: s.to_string(),
-                                    length: "".to_string(),
-                                    mime_type: "".to_string(),
-                                }),
-                                guid: None,
-                                pub_date: i.pub_date.clone(),
-                                source: i.source.as_ref().map(|s| rss::Source { title: None, url: s.clone()}),
-                                content: None,
-                                extensions: Default::default(),
-                                itunes_ext: None,
-                                dublin_core_ext: None,
-                            };
-                            app.podcasts_model.items_collection.push(item);
-                        });
-                        if items.len() > 0 {
+                        app.podcasts_model.items_collection.append(&mut items);
+
+                        let select_item = match app.podcasts_model.active_item.as_ref() {
+                            Some(ai) => {
+                                ai.channel_id != id
+                            },
+                            None => true,
+                        };
+
+                        if items_len > 0 && select_item{
                             app.podcasts_model.list_state_items.select(Some(0));
                         }
-
                         app.podcasts_model.waiting_message = None;
                     },
                     AsyncAction::RefreshChannelsList =>{
                         app.podcasts_model.podcasts_collection = app.podcasts_model.get_channels_from_db().await?;
-                    }
+                    },
+                    AsyncAction::WriteListeningState(channel_item) => {
+                        match channel_item.listening_state.as_ref() {
+                            Some(ls) => {
+                                let _ = ListeningStateDataLayer::update_current_time_for_item(db.clone(),
+                                    channel_item.enclosure, channel_item.channel_id, ls.time).await;
+                            },
+                            None => {},
+                        }
+                        
+                    },
                 }
-
-
             }
 
             if let Ok(true) = res {

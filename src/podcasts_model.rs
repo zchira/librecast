@@ -2,12 +2,12 @@ use std::{borrow::BorrowMut, io::ErrorKind, str::FromStr, sync::{Arc, RwLock}};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
-use sea_orm::{ActiveValue, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
 use tokio::sync::mpsc::UnboundedSender;
 
 use std::error::Error;
 use rss::Channel;
-use crate::{entity::{self, channel::Entity as ChannelEntity}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{data_layer::data_provider::DataProvider, entity::{channel::Entity as ChannelEntity, listening_state}, ui_models::{self, ChannelItem, ListeningState}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -16,9 +16,9 @@ pub struct PodcastsModel {
     db: DatabaseConnection,
     help_visible: bool,
     pub active_channel: Option<ChannelModel>,
-    pub active_item: Option<rss::Item>,
+    pub active_item: Option<ui_models::ChannelItem>,
     pub error: Option<String>,
-    pub items_collection: Vec<rss::Item>,
+    pub items_collection: Vec<ui_models::ChannelItem>,
     pub list_state_channels: ListState,
     pub list_state_items: ListState,
     pub active_list_state: usize,
@@ -90,35 +90,18 @@ impl PodcastsModel {
             .highlight_symbol("> ")
             .repeat_highlight_symbol(true);
 
-
         f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
 
-        let offset = self.list_state_items.offset();
-
+        // list channel items
         let simple_list = SimpleList {
+            items: &self.items_collection,
+            active: &self.active_item,
             fg_color: fg_color(1),
-            items: self.items_collection.clone().into_iter().enumerate().map(|(index, c)| {
-
-                if index < offset || index > offset + horizontal_chunks[1].height as usize + 5 {
-                    String::new()
-                } else {
-                    match self.active_item.clone() {
-                        Some(active_item) => {
-                            if c == active_item {
-                                format!("🎵 {} 🎵", c.title.clone().unwrap_or("".to_string()))
-                            } else {
-                                format!("{}", c.title.clone().unwrap_or("".to_string()))
-                            }
-                        },
-                        None => {
-                            format!("{}", c.title.clone().unwrap_or("".to_string()))
-                        }
-                    }
-                }
-            }).collect(),
         };
+
         f.render_stateful_widget(simple_list, horizontal_chunks[1], &mut self.list_state_items);
 
+        // timeline
         {
             let title = if self.active_item.is_some() {
                 self.active_item.clone().unwrap().title.unwrap_or("".to_string())
@@ -206,61 +189,21 @@ impl PodcastsModel {
                     let tx = self.tx.clone();
                     let db = self.db.clone();
 
-
                     if let Some(selected) = self.list_state_channels.selected() {
                         let selected_channel = self.podcasts_collection[selected].clone();
                         if let Some(podcast_url) = selected_channel.link {
                             self.waiting_message = Some("Fetching podcast info...".to_string());
                             tokio::spawn(async move {
-                                match PodcastsModel::get_channel_from_url(&podcast_url).await.map_err(|_| std::io::Error::new(ErrorKind::Other, "")) {
-                                    Ok(channel) => {
-                                        use entity::channel::{ Entity, ActiveModel };
-                                        let am: ActiveModel = ActiveModel {
-                                            title: ActiveValue::set(Some(channel.title().to_string())),
-                                            link: ActiveValue::set(Some(podcast_url.to_string())),
-                                            description: ActiveValue::set(Some(channel.description().to_string())),
-                                            id: ActiveValue::set(selected_channel.id) // ActiveValue::NotSet
-                                        };
-
-                                        let exist = Entity::find().filter(entity::channel::Column::Link.eq(channel.link())).one(&db).await.unwrap();
-
-                                        let channel_id = if let Some(exist) = exist {
-                                            exist.id
-                                        } else {
-                                            let res = Entity::update(am).exec(&db).await.unwrap();
-                                            res.id
-                                            // selected_channel.id // res.last_insert_id
-                                        };
-
-                                        let items = channel.items().iter().map(|i| {
-                                            entity::channel_item::ActiveModel {
-                                                id: ActiveValue::NotSet,
-                                                channel_id: ActiveValue::set(channel_id),
-                                                title: ActiveValue::set(i.title().map(|t| t.to_string())),
-                                                // link: ActiveValue::set(i.link().map(|l| l.to_string())),
-                                                link: ActiveValue::set(Some(podcast_url.to_string())), // atom:link
-                                                source: ActiveValue::set(i.source().map(|s| s.url.to_string())),
-                                                enclosure: ActiveValue::set(i.enclosure().map(|e| e.url.to_string())),
-                                                description: ActiveValue::set(i.description().map(|d| d.to_string())),
-                                                guid: ActiveValue::set(i.guid().map(|g| g.value.clone())),
-                                                pub_date: ActiveValue::set(i.pub_date().map(|d| d.to_string())),
-                                            }
-                                        });
-
-                                        let _ = entity::channel_item::Entity::delete_many().filter(entity::channel_item::Column::ChannelId.eq(channel_id)).exec(&db).await;
-
-                                        let _ = entity::channel_item::Entity::insert_many(items).exec(&db).await;
+                                match DataProvider::fetch_data(podcast_url, selected_channel.id, db).await {
+                                    Ok(channel_id) => {
                                         tx.send(AsyncAction::ChannelAdded(channel_id)).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                                         tx.send(AsyncAction::RefreshChannelsList).map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
                                     },
                                     Err(e) => {
-                                        // handle error opening channel
-                                        println!("{}", e);
-
-                                    }
-
+                                        // handle fetch error
+                                        println!("Err fetching {:#?}", e)
+                                    },
                                 };
-
                             });
                         }
                     };
@@ -284,13 +227,18 @@ impl PodcastsModel {
                             p.resume();
                         } else {
                             p.pause();
+                            self.write_listening_state(p.current_position() as f32);
                         }
                     }
                 }
                 KeyCode::Left | KeyCode::Right => { 
                     self.active_list_state = (self.active_list_state + 1) % 2;
                 }
-                KeyCode::Char('q') => return Ok(true),
+                // KeyCode::Char('q') => {
+                //     let time = self.player_engine.read().unwrap().current_position();
+                //     self.write_listening_state(time as f32);
+                //     return Ok(true);
+                // },
                 KeyCode::Enter => {
                     if self.active_list_state == 0 {
                         // load items then move items list
@@ -300,24 +248,22 @@ impl PodcastsModel {
                         }
                         self.active_list_state = self.active_list_state + 1;
                     } else {
+                        let mut p = self.player_engine.write().unwrap();
+                        self.write_listening_state(p.current_position() as f32);
                         let selected_episode = &self.items_collection[self.list_state_items.selected().unwrap_or_default()];
                         self.active_item = Some(selected_episode.clone());
-                        let mut p = self.player_engine.write().unwrap();
-                        match p.open(&selected_episode.enclosure().unwrap().url) {
+
+                        match p.open(&selected_episode.enclosure) {
                             Ok(_) => {
                                 self.error = None;
+                                match selected_episode.listening_state.as_ref() {
+                                    Some(ls) => {
+                                        p.seek(ls.time as f64);
+                                    },
+                                    None => (),
+                                }
                             },
                             Err(e) => self.error = Some(e.to_string()),
-                        }
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    if self.active_channel.is_some() {
-                        let mut p = self.player_engine.write().unwrap();
-                        if p.is_paused() {
-                            p.resume()
-                        } else {
-                            p.pause()
                         }
                     }
                 },
@@ -365,7 +311,26 @@ impl PodcastsModel {
             }
             Ok(false)
         }
+    }
 
+    fn write_listening_state(&self, time: f32) {
+        match self.active_item.as_ref() {
+            Some(active_item) => {
+                let mut ci = active_item.clone();
+                ci.listening_state = Some(ListeningState {
+                        time,
+                        finished: false,
+                    });
+                let _ = self.tx.send(AsyncAction::WriteListeningState(ci));
+
+                if let Some(selected) = self.list_state_channels.selected() {
+                    let selected_channel = self.podcasts_collection[selected].clone();
+                    self.tx.send(AsyncAction::ChannelAdded(selected_channel.id))
+                        .map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string())).unwrap();
+                }
+            },
+            None => (),
+        }
     }
 
     fn handle_open_dialog_events(&mut self, key: KeyEvent) -> std::io::Result<bool> {
@@ -394,7 +359,7 @@ impl PodcastsModel {
 }
 
 
-#[test]
+// #[test]
 fn test_rss() {
     let url = "https://podcast.daskoimladja.com/feed.xml";
     let content = ureq::get(url).call().unwrap().into_string().unwrap();
