@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use std::error::Error;
 use rss::Channel;
-use crate::{data_layer::data_provider::DataProvider, entity::{channel::Entity as ChannelEntity, listening_state}, ui_models::{self, ChannelItem, ListeningState}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{data_layer::data_provider::DataProvider, entity::channel::Entity as ChannelEntity, ui_models::{self, ListeningState}, widgets::{item_details::ItemDetails, open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -30,7 +30,6 @@ pub struct PodcastsModel {
     pub waiting_message: Option<String>,
     pub open_dialog_state: OpenDialogState,
 }
-
 
 impl PodcastsModel {
     pub fn new(db: DatabaseConnection, tx: UnboundedSender<crate::AsyncAction>) -> Self {
@@ -79,6 +78,13 @@ impl PodcastsModel {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(vertical_chunks[0]);
 
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(horizontal_chunks[0]);
+
+        let channels_chunk = chunks[0];
+        let channel_items_chunk = chunks[1];
+        let item_details_chunk = horizontal_chunks[1];
 
         // list channels
         let fg_color  = |i: usize| if self.active_list_state == i { ratatui::style::Color::Blue } else { ratatui::style::Color::DarkGray };
@@ -90,7 +96,7 @@ impl PodcastsModel {
             .highlight_symbol("> ")
             .repeat_highlight_symbol(true);
 
-        f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
+        f.render_stateful_widget(list, channels_chunk, &mut self.list_state_channels);
 
         // list channel items
         let simple_list = SimpleList {
@@ -99,7 +105,26 @@ impl PodcastsModel {
             fg_color: fg_color(1),
         };
 
-        f.render_stateful_widget(simple_list, horizontal_chunks[1], &mut self.list_state_items);
+        f.render_stateful_widget(simple_list, channel_items_chunk, &mut self.list_state_items);
+
+        // item details
+        let selected_episode = match self.list_state_items.selected() {
+            Some(i) => {
+                self.items_collection.get(i).clone()
+            },
+            None => None,
+        };
+        let currently_playing = match (self.active_item.as_ref(), selected_episode) {
+            (Some(a), Some(b)) => a.enclosure == b.enclosure,
+            (_, _) => false,
+        };
+
+        let item_details = ItemDetails {
+            currently_playing,
+            item: &selected_episode,
+            fg_color: ratatui::style::Color::DarkGray
+        };
+        f.render_widget(item_details, item_details_chunk);
 
         // timeline
         {
@@ -120,14 +145,6 @@ impl PodcastsModel {
             };
             f.render_widget(timeline, vertical_chunks[1]);
         }
-
-        // let volume = self.player_engine.read().unwrap().get_volume() * 100.0;
-        // let volume_line = Line::from(vec![Span::styled(format!("Volume: {:.0}%", volume), Style::default().fg(ratatui::style::Color::Blue))]);
-        // let volume_paragraph = Paragraph::new(vec![volume_line]);
-        //
-        // let volume_area = Rect::new(vertical_chunks[1].width - 13, vertical_chunks[1].y + 1, 13, 1);
-        //
-        // f.render_widget(volume_paragraph, volume_area);
 
         if let Some(waiting_message) = self.waiting_message.clone() {
             let waiting = WaitingMessageDialog::new(waiting_message);
@@ -234,11 +251,6 @@ impl PodcastsModel {
                 KeyCode::Left | KeyCode::Right => { 
                     self.active_list_state = (self.active_list_state + 1) % 2;
                 }
-                // KeyCode::Char('q') => {
-                //     let time = self.player_engine.read().unwrap().current_position();
-                //     self.write_listening_state(time as f32);
-                //     return Ok(true);
-                // },
                 KeyCode::Enter => {
                     if self.active_list_state == 0 {
                         // load items then move items list
@@ -356,18 +368,23 @@ impl PodcastsModel {
         }
     }
 
+    pub async fn on_quit(&self) {
+        let time = self.player_engine.read().unwrap().current_position();
+        self.write_listening_state(time as f32);
+    }
+
 }
 
 
 // #[test]
-fn test_rss() {
-    let url = "https://podcast.daskoimladja.com/feed.xml";
-    let content = ureq::get(url).call().unwrap().into_string().unwrap();
-    let mut channel = Channel::from_str(&content).unwrap();
-    channel.set_items(vec![]);
-    let ext = channel.extensions().get("atom").and_then(|a| a.get("link"));
-
-    println!("channel: {:#?}", channel);
-    println!("-----------");
-    println!("{:#?}", ext);
-}
+// fn test_rss() {
+//     let url = "https://podcast.daskoimladja.com/feed.xml";
+//     let content = ureq::get(url).call().unwrap().into_string().unwrap();
+//     let mut channel = Channel::from_str(&content).unwrap();
+//     channel.set_items(vec![]);
+//     let ext = channel.extensions().get("atom").and_then(|a| a.get("link"));
+//
+//     println!("channel: {:#?}", channel);
+//     println!("-----------");
+//     println!("{:#?}", ext);
+// }

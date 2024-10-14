@@ -1,4 +1,4 @@
-use sea_orm_migration::{prelude::*, seaql_migrations::PrimaryKey};
+use sea_orm_migration::{prelude::*};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -15,13 +15,6 @@ impl MigrationTrait for Migration {
                         .col(ColumnDef::new(Channel::Title).string())
                         .col(ColumnDef::new(Channel::Link).unique_key().string())
                         .col(ColumnDef::new(Channel::Description).string())
-                        // .foreign_key(
-                        //     ForeignKey::create()
-                        //         .name("id_fk")
-                        //         .from(Channel::Table, Channel::Id)
-                        //         .to(ChannelItem::Table, ChannelItem::ChannelId)
-                        //         .on_delete(ForeignKeyAction::Cascade)
-                        //     )
                         .to_owned()
                 )
             .await?;
@@ -69,12 +62,6 @@ impl MigrationTrait for Migration {
                                 .to(Channel::Table, Channel::Id)
                                 .on_delete(ForeignKeyAction::Cascade)
                             )
-                        // .foreign_key(
-                        //     ForeignKey::create()
-                        //         .name("fk_enclosure")
-                        //         .from(ListeningState::Table, ListeningState::ChannelItemEnclosure)
-                        //         .to(ChannelItem::Table, ChannelItem::Enclosure)
-                        //     )
                         .to_owned()
                 )
             .await?;
@@ -99,31 +86,31 @@ impl MigrationTrait for Migration {
     }
 }
 
-impl Migration {
-    async fn seed_data(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-        let q1 = Query::insert().into_table(Channel::Table)
-            .columns([Channel::Title, Channel::Link, Channel::Description])
-            .values_panic(["Dasko i Mladja".into(), "http://daskoimladha.com".into(), "desc".into()])
-            .values_panic(["Agelast".into(), "http://agelast.com".into(), "desc2".into()])
-            .to_owned();
-
-        manager.exec_stmt(q1).await?;
-
-        let q2 = Query::insert().into_table(ChannelItem::Table)
-            .columns([ChannelItem::ChannelId, ChannelItem::Title, ChannelItem::Link, ChannelItem::Description])
-            .values_panic([1.into(), "D i M1".into(), "http://link1.com".into(), "desc".into()])
-            .values_panic([1.into(), "D i M2".into(), "http://link2.com".into(), "desc".into()])
-            .values_panic([1.into(), "D i M3".into(), "http://link3.com".into(), "desc".into()])
-            .values_panic([2.into(), "agelas1".into(), "http://link4.com".into(), "desc".into()])
-            .values_panic([2.into(), "agelas2".into(), "http://link5.com".into(), "desc".into()])
-            .values_panic([2.into(), "agelas3".into(), "http://link5.com".into(), "desc".into()])
-            .to_owned();
-
-        manager.exec_stmt(q2).await?;
-
-        Ok(())
-    }
-}
+// impl Migration {
+//     async fn seed_data(&self, manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+//         let q1 = Query::insert().into_table(Channel::Table)
+//             .columns([Channel::Title, Channel::Link, Channel::Description])
+//             .values_panic(["Dasko i Mladja".into(), "http://daskoimladha.com".into(), "desc".into()])
+//             .values_panic(["Agelast".into(), "http://agelast.com".into(), "desc2".into()])
+//             .to_owned();
+//
+//         manager.exec_stmt(q1).await?;
+//
+//         let q2 = Query::insert().into_table(ChannelItem::Table)
+//             .columns([ChannelItem::ChannelId, ChannelItem::Title, ChannelItem::Link, ChannelItem::Description])
+//             .values_panic([1.into(), "D i M1".into(), "http://link1.com".into(), "desc".into()])
+//             .values_panic([1.into(), "D i M2".into(), "http://link2.com".into(), "desc".into()])
+//             .values_panic([1.into(), "D i M3".into(), "http://link3.com".into(), "desc".into()])
+//             .values_panic([2.into(), "agelas1".into(), "http://link4.com".into(), "desc".into()])
+//             .values_panic([2.into(), "agelas2".into(), "http://link5.com".into(), "desc".into()])
+//             .values_panic([2.into(), "agelas3".into(), "http://link5.com".into(), "desc".into()])
+//             .to_owned();
+//
+//         manager.exec_stmt(q2).await?;
+//
+//         Ok(())
+//     }
+// }
 
 #[derive(DeriveIden)]
 enum Channel {
@@ -157,8 +144,3 @@ enum ListeningState {
     Time,
     Finished
 }
-
-
-
-
-

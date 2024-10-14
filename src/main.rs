@@ -20,7 +20,7 @@ use radio_model::RadioModel;
 use ratatui::{Terminal, prelude::{CrosstermBackend, Backend, Layout, Direction}, Frame, widgets::{Block, Borders, ListState, Tabs}};
 use ratatui::layout::Constraint;
 use rss::Channel;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, DbErr, EntityTrait};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use data_layer::{data_provider::DataProvider, listening_state_data_layer::ListeningStateDataLayer};
 
@@ -56,7 +56,10 @@ impl App {
     async fn handle_events(&mut self, event: Event) -> std::io::Result<bool> {
         if let Event::Key(key) = event {
         match key.code {
-            KeyCode::Char('q') => return Ok(true),
+            KeyCode::Char('q') => {
+                self.podcasts_model.on_quit().await;
+                return Ok(true);
+            },
             KeyCode::Char('1') => {
                 self.active_tab = 0;
             },

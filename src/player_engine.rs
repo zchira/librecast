@@ -30,14 +30,14 @@ impl PlayerEngine {
         Ok(())
     }
 
-    fn play(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(addr) = self.stream_addr.as_ref() {
-            self.player.open(addr);
-            self.player.play();
-            self.playing = true;
-        }
-        Ok(())
-    }
+    // fn play(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    //     if let Some(addr) = self.stream_addr.as_ref() {
+    //         self.player.open(addr);
+    //         self.player.play();
+    //         self.playing = true;
+    //     }
+    //     Ok(())
+    // }
 
     pub fn current_position(&self) -> f64 {
         self.player.current_position()

@@ -1,10 +1,9 @@
-// use crate::entity::channel::Entity as ChannelEntity;
-// use crate::entity::channel::Model as ChannelModel;
 use crate::entity::{self, channel_item, listening_state};
 use crate::podcasts_model::PodcastsModel;
 use crate::ui_models;
 use chrono::FixedOffset;
-use sea_orm::{ActiveValue, Database, DatabaseConnection, DbErr, QueryOrder, QuerySelect, QueryTrait};
+use regex::Regex;
+use sea_orm::{ActiveValue, DatabaseConnection, DbErr, QueryOrder};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, RelationDef, Linked};
 use std::error::Error;
 use std::io::ErrorKind;
@@ -57,10 +56,16 @@ impl DataProvider {
 
 
                 let r = entity::channel_item::Entity::delete_many().filter(entity::channel_item::Column::ChannelId.eq(channel_id)).exec(&db).await;
+                match r {
+                    Ok(_) => { },
+                    Err(e) => return Err(Box::new(e)),
+                }
 
                 for c in items.chunks(500) {
                     let r = entity::channel_item::Entity::insert_many(c.to_vec()).exec(&db).await;
-                    // handle error opening channel
+                    if r.is_err() {
+                        return Err(Box::new(r.unwrap_err()));
+                    }
                 }
 
                 Ok(channel_id)
@@ -107,7 +112,6 @@ impl Linked for ChannelItemToListeningState {
     }
 }
 
-
 impl From<&(entity::channel_item::Model, Option<listening_state::Model>)> for ui_models::ChannelItem {
     fn from(entry: &(entity::channel_item::Model, Option<listening_state::Model>)) -> Self {
         let i = entry.0.clone();
@@ -121,10 +125,12 @@ impl From<&(entity::channel_item::Model, Option<listening_state::Model>)> for ui
             None => None
         };
 
+        let rg = Regex::new("<[^>]*>").unwrap();
+
         let item = ui_models::ChannelItem {
             title: i.title.clone(),
             link: i.link.clone(),
-            description: i.description.clone(),
+            description: i.description.as_ref().map(|d| rg.replace_all(d, "\n").to_string()).clone(),
             enclosure: i.enclosure.to_string(),
             guid: None,
             pub_date: i.pub_date.clone(),
@@ -138,37 +144,37 @@ impl From<&(entity::channel_item::Model, Option<listening_state::Model>)> for ui
 }
 
 // #[tokio::test]
-async fn test_get_items_with_state() -> Result<(), DbErr> {
-
-    let home = std::env::var("HOME").unwrap();
-    let connection = std::env::var("DATABASE_URL").unwrap_or(format!("sqlite://{}/.librecast.db?mode=rwc", home));
-    let db: DatabaseConnection = Database::connect(connection).await?;
-
-    let enclosure_url = "https://media.transistor.fm/dd1e8e10/db7f2e6d.mp3".to_string();
-    crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::update_current_time_for_item(db.clone(), enclosure_url, 2, 5.0).await;
-
-
-    let enclosure_url = "https://media.transistor.fm/59bdd3e8/20064bdc.mp3".to_string();
-    crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::update_current_time_for_item(db.clone(), enclosure_url.clone(), 2, 5.0).await;
-    let _ = crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::mark_item_as_finished(db.clone(), enclosure_url, 2).await;
-
-
-    // println!("channel: {:#?}", channel);
-    // println!("-----------");
-    // println!("{:#?}", ext);
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_join() -> Result<(), DbErr> {
-
-    let home = std::env::var("HOME").unwrap();
-    let connection = std::env::var("DATABASE_URL").unwrap_or(format!("sqlite://{}/.librecast.db?mode=rwc", home));
-    let db: DatabaseConnection = Database::connect(connection).await?;
-
-    let res = DataProvider::get_items_from_db(2, &db).await?;
-    println!("RES!: {:#?}", res);
-
-
-    Ok(())
-}
+// async fn test_get_items_with_state() -> Result<(), DbErr> {
+//
+//     let home = std::env::var("HOME").unwrap();
+//     let connection = std::env::var("DATABASE_URL").unwrap_or(format!("sqlite://{}/.librecast.db?mode=rwc", home));
+//     let db: DatabaseConnection = Database::connect(connection).await?;
+//
+//     let enclosure_url = "https://media.transistor.fm/dd1e8e10/db7f2e6d.mp3".to_string();
+//     crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::update_current_time_for_item(db.clone(), enclosure_url, 2, 5.0).await;
+//
+//
+//     let enclosure_url = "https://media.transistor.fm/59bdd3e8/20064bdc.mp3".to_string();
+//     crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::update_current_time_for_item(db.clone(), enclosure_url.clone(), 2, 5.0).await;
+//     let _ = crate::data_layer::listening_state_data_layer::ListeningStateDataLayer::mark_item_as_finished(db.clone(), enclosure_url, 2).await;
+//
+//
+//     // println!("channel: {:#?}", channel);
+//     // println!("-----------");
+//     // println!("{:#?}", ext);
+//     Ok(())
+// }
+//
+// #[tokio::test]
+// async fn test_join() -> Result<(), DbErr> {
+//
+//     let home = std::env::var("HOME").unwrap();
+//     let connection = std::env::var("DATABASE_URL").unwrap_or(format!("sqlite://{}/.librecast.db?mode=rwc", home));
+//     let db: DatabaseConnection = Database::connect(connection).await?;
+//
+//     let res = DataProvider::get_items_from_db(2, &db).await?;
+//     println!("RES!: {:#?}", res);
+//
+//
+//     Ok(())
+// }
