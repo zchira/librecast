@@ -80,6 +80,7 @@ impl<'a> StatefulWidget for SimpleList<'a> {
 
             let line = match item_state {
                 ItemState::Finished => {
+                    let text = format!("✓ {}", &item.title.clone().unwrap_or("".to_string()));
                     Line::from(vec![
                         Span::styled(text, style.italic().dark_gray())
                     ])

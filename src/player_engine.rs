@@ -1,9 +1,9 @@
-use url2audio::Player;
+use url2audio::{player_engine::Playing, Player};
 
 pub struct PlayerEngine {
     pub stream_addr: Option<String>,
     pub player: Player,
-    playing: bool
+    // playing: bool
 }
 
 impl Default for PlayerEngine {
@@ -18,7 +18,7 @@ impl PlayerEngine {
         PlayerEngine {
             stream_addr: None,
             player,
-            playing: false
+            // playing: false
         }
     }
 
@@ -26,7 +26,7 @@ impl PlayerEngine {
         self.player.open(stream_addr);
         self.stream_addr = Some(stream_addr.to_string());
         self.player.play();
-        self.playing = true;
+        // self.playing = true;
         Ok(())
     }
 
@@ -55,17 +55,25 @@ impl PlayerEngine {
         self.player.duration_display()
     }
 
-    pub fn is_paused(&self) -> bool {
-        !self.playing
+    // pub fn is_paused(&self) -> bool {
+    //     !self.player.is_playing()
+    // }
+
+    pub fn is_playing(&self) -> Playing {
+        self.player.is_playing()
+    }
+
+    pub fn buffer_chunks(&self) -> Vec<(f32, f32)> {
+        self.player.buffer_chunks()
     }
 
     pub fn pause(&mut self) {
-        self.playing = false;
+        // self.playing = false;
         self.player.pause()
     }
 
     pub fn resume(&mut self) {
-        self.playing = true;
+        // self.playing = true;
         self.player.play()
     }
 

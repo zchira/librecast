@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
 use tui_textbox::{Textbox, TextboxState};
+use url2audio::player_engine::Playing;
 
 use crate::{config, player_engine::PlayerEngine};
 
@@ -74,7 +75,7 @@ impl RadioModel {
             None => {
                 match self.active_stream.as_ref() {
                     Some(s) => {
-                        let play_char = if self.player_engine.read().unwrap().is_paused() { "Ⅱ" } else { "▶" };
+                        let play_char = if self.player_engine.read().unwrap().is_playing() == Playing::Playing { "▶" } else { "Ⅱ" };
                         Line::from(vec![
                                    Span::styled(format!("{} {}", play_char, s), Style::default().fg(ratatui::style::Color::Blue)),
                         ])
@@ -195,7 +196,7 @@ impl RadioModel {
                 KeyCode::Char(' ') => {
                     if self.active_stream.is_some() {
                         let mut p = self.player_engine.write().unwrap();
-                        if p.is_paused() {
+                        if p.is_playing() != Playing::Playing {
                             p.resume()
                         } else {
                             p.pause()

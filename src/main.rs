@@ -110,8 +110,15 @@ async fn init_data(db: &DatabaseConnection) -> Result<(), DbErr>{
         link: sea_orm::ActiveValue::Set(Some("https://feeds.transistor.fm/agelast-podcast".to_string())),
         description: sea_orm::ActiveValue::Set(Some("fake...".to_string())),
     };
-
     c2.insert(db).await?;
+
+    let c3 = channel::ActiveModel {
+        id: sea_orm::ActiveValue::NotSet,
+        title: sea_orm::ActiveValue::Set(Some("100 minuta buke".to_string())),
+        link: sea_orm::ActiveValue::Set(Some("https://feeds.soundcloud.com/users/soundcloud:users:1250191486/sounds.rss".to_string())),
+        description: sea_orm::ActiveValue::Set(Some("fake...".to_string())),
+    };
+    c3.insert(db).await?;
     Ok(())
 }
 
@@ -211,7 +218,6 @@ async fn run_app<B: Backend>(
                             },
                             None => {},
                         }
-                        
                     },
                 }
             }

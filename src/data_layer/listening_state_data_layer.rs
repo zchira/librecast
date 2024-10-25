@@ -29,15 +29,12 @@ impl ListeningStateDataLayer {
             .filter(listening_state::Column::ChannelItemEnclosure.eq(enclosure_url))
             .one(&db).await?;
 
-        println!("Res: {:#?}", res);
-
         match res {
             Some(i) => {
                 let mut m: ListeningStateModel = i.into();
                 m.finished = ActiveValue::set(true);
                 m.time = ActiveValue::set(0.0);
                 let res2 = ListeningStateEntity::update(m).exec(&db).await?;
-                println!("Res2: {:#?}", res2);
                 Ok(())
             },
             None => {

@@ -4,10 +4,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
 use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
 use tokio::sync::mpsc::UnboundedSender;
+use url2audio::player_engine::Playing;
 
 use std::error::Error;
 use rss::Channel;
-use crate::{data_layer::data_provider::DataProvider, entity::channel::Entity as ChannelEntity, ui_models::{self, ListeningState}, widgets::{item_details::ItemDetails, open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{data_layer::{data_provider::DataProvider, listening_state_data_layer}, entity::channel::Entity as ChannelEntity, ui_models::{self, ListeningState}, widgets::{item_details::ItemDetails, open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -139,11 +140,34 @@ impl PodcastsModel {
                 progress_display: p.current_position_display(),
                 total: p.duration(),
                 total_display: p.duration_display(),
-                playing: !(p.is_paused()),
+                playing: p.is_playing(),
                 error: p.get_error(),
-                title
+                title,
+                buffer: &p.buffer_chunks()
             };
             f.render_widget(timeline, vertical_chunks[1]);
+        }
+
+        // handle finished
+        {
+            let p = self.player_engine.read().unwrap();
+            if p.is_playing() == Playing::Finished {
+                match self.active_item.as_mut() {
+                    Some(ai) => {
+                        match ai.listening_state.as_mut() {
+                            Some(ls) => {
+                                if !ls.finished {
+                                    ls.finished = true;
+                                    self.write_listening_state(0.0);
+                                }
+                            },
+                            None => {
+                            },
+                        }
+                    },
+                    None => {},
+                }
+            }
         }
 
         if let Some(waiting_message) = self.waiting_message.clone() {
@@ -240,7 +264,7 @@ impl PodcastsModel {
                 KeyCode::Char(' ') => {
                     if self.active_item.is_some() {
                         let mut p = self.player_engine.write().unwrap();
-                        if p.is_paused() {
+                        if p.is_playing() == Playing::Paused {
                             p.resume();
                         } else {
                             p.pause();
@@ -270,7 +294,9 @@ impl PodcastsModel {
                                 self.error = None;
                                 match selected_episode.listening_state.as_ref() {
                                     Some(ls) => {
-                                        p.seek(ls.time as f64);
+                                        if !ls.finished {
+                                            p.seek(ls.time as f64);
+                                        }
                                     },
                                     None => (),
                                 }
@@ -329,10 +355,26 @@ impl PodcastsModel {
         match self.active_item.as_ref() {
             Some(active_item) => {
                 let mut ci = active_item.clone();
-                ci.listening_state = Some(ListeningState {
+                ci.listening_state = match active_item.listening_state.as_ref() {
+                    Some(ls) => {
+                        if ls.finished {
+                            Some(ListeningState {
+                                time: 0.0,
+                                finished: true,
+                            })
+                        } else {
+                            Some(ListeningState {
+                                time,
+                                finished: false,
+                            })
+                        }
+                    },
+                    None => Some(ListeningState {
                         time,
                         finished: false,
-                    });
+                    })
+                };
+
                 let _ = self.tx.send(AsyncAction::WriteListeningState(ci));
 
                 if let Some(selected) = self.list_state_channels.selected() {
