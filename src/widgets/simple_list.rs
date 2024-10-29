@@ -1,6 +1,4 @@
-use color_eyre::owo_colors::OwoColorize;
-use crossterm::style;
-use ratatui::{buffer::Buffer, layout::Rect, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, ListState, StatefulWidget, Widget}};
+use ratatui::{buffer::Buffer, layout::Rect, style::{Color, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, ListState, StatefulWidget, Widget}};
 
 use crate::ui_models;
 
@@ -63,7 +61,7 @@ impl<'a> StatefulWidget for SimpleList<'a> {
             let area: Rect = Rect {
                 x: area.x + 1,
                 y: area.y + dx,
-                width: area.width,
+                width: area.width - 2,
                 height: area.height,
             };
             dx = dx + 1;
@@ -82,6 +80,7 @@ impl<'a> StatefulWidget for SimpleList<'a> {
 
             let line = match item_state {
                 ItemState::Finished => {
+                    let text = format!("✓ {}", &item.title.clone().unwrap_or("".to_string()));
                     Line::from(vec![
                         Span::styled(text, style.italic().dark_gray())
                     ])

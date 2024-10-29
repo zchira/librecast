@@ -4,10 +4,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListState, Paragraph}, Frame};
 use sea_orm::{DatabaseConnection, DbErr, EntityTrait};
 use tokio::sync::mpsc::UnboundedSender;
+use url2audio::player_engine::Playing;
 
 use std::error::Error;
 use rss::Channel;
-use crate::{data_layer::data_provider::DataProvider, entity::{channel::Entity as ChannelEntity, listening_state}, ui_models::{self, ChannelItem, ListeningState}, widgets::{open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
+use crate::{data_layer::{data_provider::DataProvider, listening_state_data_layer}, entity::channel::Entity as ChannelEntity, ui_models::{self, ListeningState}, widgets::{item_details::ItemDetails, open_dialog::{OpenDialog, OpenDialogState}, simple_list::SimpleList, timeline::Timeline, waiting_message_dialog::{WaitingMessageDialog, WaitingMessageDialogState}}, AsyncAction};
 
 use crate::player_engine::PlayerEngine;
 use crate::entity::channel::Model as ChannelModel;
@@ -30,7 +31,6 @@ pub struct PodcastsModel {
     pub waiting_message: Option<String>,
     pub open_dialog_state: OpenDialogState,
 }
-
 
 impl PodcastsModel {
     pub fn new(db: DatabaseConnection, tx: UnboundedSender<crate::AsyncAction>) -> Self {
@@ -79,6 +79,13 @@ impl PodcastsModel {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(vertical_chunks[0]);
 
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(horizontal_chunks[0]);
+
+        let channels_chunk = chunks[0];
+        let channel_items_chunk = chunks[1];
+        let item_details_chunk = horizontal_chunks[1];
 
         // list channels
         let fg_color  = |i: usize| if self.active_list_state == i { ratatui::style::Color::Blue } else { ratatui::style::Color::DarkGray };
@@ -90,7 +97,7 @@ impl PodcastsModel {
             .highlight_symbol("> ")
             .repeat_highlight_symbol(true);
 
-        f.render_stateful_widget(list, horizontal_chunks[0], &mut self.list_state_channels);
+        f.render_stateful_widget(list, channels_chunk, &mut self.list_state_channels);
 
         // list channel items
         let simple_list = SimpleList {
@@ -99,7 +106,26 @@ impl PodcastsModel {
             fg_color: fg_color(1),
         };
 
-        f.render_stateful_widget(simple_list, horizontal_chunks[1], &mut self.list_state_items);
+        f.render_stateful_widget(simple_list, channel_items_chunk, &mut self.list_state_items);
+
+        // item details
+        let selected_episode = match self.list_state_items.selected() {
+            Some(i) => {
+                self.items_collection.get(i).clone()
+            },
+            None => None,
+        };
+        let currently_playing = match (self.active_item.as_ref(), selected_episode) {
+            (Some(a), Some(b)) => a.enclosure == b.enclosure,
+            (_, _) => false,
+        };
+
+        let item_details = ItemDetails {
+            currently_playing,
+            item: &selected_episode,
+            fg_color: ratatui::style::Color::DarkGray
+        };
+        f.render_widget(item_details, item_details_chunk);
 
         // timeline
         {
@@ -114,20 +140,35 @@ impl PodcastsModel {
                 progress_display: p.current_position_display(),
                 total: p.duration(),
                 total_display: p.duration_display(),
-                playing: !(p.is_paused()),
+                playing: p.is_playing(),
                 error: p.get_error(),
-                title
+                title,
+                buffer: &p.buffer_chunks()
             };
             f.render_widget(timeline, vertical_chunks[1]);
         }
 
-        // let volume = self.player_engine.read().unwrap().get_volume() * 100.0;
-        // let volume_line = Line::from(vec![Span::styled(format!("Volume: {:.0}%", volume), Style::default().fg(ratatui::style::Color::Blue))]);
-        // let volume_paragraph = Paragraph::new(vec![volume_line]);
-        //
-        // let volume_area = Rect::new(vertical_chunks[1].width - 13, vertical_chunks[1].y + 1, 13, 1);
-        //
-        // f.render_widget(volume_paragraph, volume_area);
+        // handle finished
+        {
+            let p = self.player_engine.read().unwrap();
+            if p.is_playing() == Playing::Finished {
+                match self.active_item.as_mut() {
+                    Some(ai) => {
+                        match ai.listening_state.as_mut() {
+                            Some(ls) => {
+                                if !ls.finished {
+                                    ls.finished = true;
+                                    self.write_listening_state(0.0);
+                                }
+                            },
+                            None => {
+                            },
+                        }
+                    },
+                    None => {},
+                }
+            }
+        }
 
         if let Some(waiting_message) = self.waiting_message.clone() {
             let waiting = WaitingMessageDialog::new(waiting_message);
@@ -223,7 +264,7 @@ impl PodcastsModel {
                 KeyCode::Char(' ') => {
                     if self.active_item.is_some() {
                         let mut p = self.player_engine.write().unwrap();
-                        if p.is_paused() {
+                        if p.is_playing() == Playing::Paused {
                             p.resume();
                         } else {
                             p.pause();
@@ -234,11 +275,6 @@ impl PodcastsModel {
                 KeyCode::Left | KeyCode::Right => { 
                     self.active_list_state = (self.active_list_state + 1) % 2;
                 }
-                // KeyCode::Char('q') => {
-                //     let time = self.player_engine.read().unwrap().current_position();
-                //     self.write_listening_state(time as f32);
-                //     return Ok(true);
-                // },
                 KeyCode::Enter => {
                     if self.active_list_state == 0 {
                         // load items then move items list
@@ -258,7 +294,9 @@ impl PodcastsModel {
                                 self.error = None;
                                 match selected_episode.listening_state.as_ref() {
                                     Some(ls) => {
-                                        p.seek(ls.time as f64);
+                                        if !ls.finished {
+                                            p.seek(ls.time as f64);
+                                        }
                                     },
                                     None => (),
                                 }
@@ -317,10 +355,26 @@ impl PodcastsModel {
         match self.active_item.as_ref() {
             Some(active_item) => {
                 let mut ci = active_item.clone();
-                ci.listening_state = Some(ListeningState {
+                ci.listening_state = match active_item.listening_state.as_ref() {
+                    Some(ls) => {
+                        if ls.finished {
+                            Some(ListeningState {
+                                time: 0.0,
+                                finished: true,
+                            })
+                        } else {
+                            Some(ListeningState {
+                                time,
+                                finished: false,
+                            })
+                        }
+                    },
+                    None => Some(ListeningState {
                         time,
                         finished: false,
-                    });
+                    })
+                };
+
                 let _ = self.tx.send(AsyncAction::WriteListeningState(ci));
 
                 if let Some(selected) = self.list_state_channels.selected() {
@@ -356,18 +410,23 @@ impl PodcastsModel {
         }
     }
 
+    pub async fn on_quit(&self) {
+        let time = self.player_engine.read().unwrap().current_position();
+        self.write_listening_state(time as f32);
+    }
+
 }
 
 
 // #[test]
-fn test_rss() {
-    let url = "https://podcast.daskoimladja.com/feed.xml";
-    let content = ureq::get(url).call().unwrap().into_string().unwrap();
-    let mut channel = Channel::from_str(&content).unwrap();
-    channel.set_items(vec![]);
-    let ext = channel.extensions().get("atom").and_then(|a| a.get("link"));
-
-    println!("channel: {:#?}", channel);
-    println!("-----------");
-    println!("{:#?}", ext);
-}
+// fn test_rss() {
+//     let url = "https://podcast.daskoimladja.com/feed.xml";
+//     let content = ureq::get(url).call().unwrap().into_string().unwrap();
+//     let mut channel = Channel::from_str(&content).unwrap();
+//     channel.set_items(vec![]);
+//     let ext = channel.extensions().get("atom").and_then(|a| a.get("link"));
+//
+//     println!("channel: {:#?}", channel);
+//     println!("-----------");
+//     println!("{:#?}", ext);
+// }
